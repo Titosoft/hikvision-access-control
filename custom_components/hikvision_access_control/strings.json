@@ -1,0 +1,27 @@
+{
+  "title": "Hikvision Access Control",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Adicionar terminal Hikvision",
+        "description": "Conecta localmente ao terminal usando ISAPI e autenticação Digest.",
+        "data": {
+          "device_name": "Nome do dispositivo",
+          "host": "Endereço IP",
+          "port": "Porta",
+          "username": "Usuário",
+          "password": "Senha",
+          "use_https": "Usar HTTPS",
+          "verify_ssl": "Verificar certificado HTTPS"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Não foi possível conectar ao terminal.",
+      "invalid_auth": "Usuário, senha ou permissões inválidos."
+    },
+    "abort": {
+      "already_configured": "Este terminal já está configurado."
+    }
+  }
+}
