@@ -14,6 +14,30 @@
           "use_https": "Usar HTTPS",
           "verify_ssl": "Verificar certificado HTTPS"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigurar terminal Hikvision",
+        "description": "Atualize as configurações da conexão ISAPI local.",
+        "data": {
+          "device_name": "Nome do dispositivo",
+          "host": "Endereço IP",
+          "port": "Porta",
+          "username": "Usuário",
+          "password": "Senha",
+          "use_https": "Usar HTTPS",
+          "verify_ssl": "Verificar certificado HTTPS"
+        },
+        "data_description": {
+          "password": "Deixe em branco para manter a senha atual."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reautenticar terminal Hikvision",
+        "description": "Informe credenciais com permissão para acessar a ISAPI.",
+        "data": {
+          "username": "Usuário",
+          "password": "Senha"
+        }
       }
     },
     "error": {
@@ -21,7 +45,59 @@
       "invalid_auth": "Usuário, senha ou permissões inválidos."
     },
     "abort": {
-      "already_configured": "Este terminal já está configurado."
+      "already_configured": "Este terminal já está configurado.",
+      "reauth_successful": "A reautenticação foi concluída.",
+      "reconfigure_successful": "A reconfiguração foi concluída.",
+      "unique_id_mismatch": "As configurações identificam outro terminal."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "relay_unlocked": {"name": "Relé de abertura"}
+    },
+    "button": {
+      "open_door": {"name": "Abrir portão"}
+    },
+    "camera": {
+      "last_access_picture": {"name": "Foto do último acesso"}
+    },
+    "event": {
+      "access_event": {
+        "name": "Evento de acesso",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "door_locked": "Relé travado",
+              "door_unlocked": "Relé destravado",
+              "face_authenticated": "Autenticação facial autorizada",
+              "unknown_access_event": "Evento de acesso desconhecido"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "connection": {
+        "name": "Conexão ISAPI",
+        "state": {"offline": "Offline", "online": "Online"}
+      },
+      "employee_id": {"name": "Matrícula do último usuário"},
+      "last_access_time": {"name": "Horário do último acesso"},
+      "last_event": {
+        "name": "Último evento",
+        "state": {
+          "door_locked": "Relé travado",
+          "door_unlocked": "Relé destravado",
+          "face_authenticated": "Autenticação facial autorizada",
+          "unknown_access_event": "Evento de acesso desconhecido"
+        }
+      },
+      "last_result": {
+        "name": "Último resultado",
+        "state": {"authorized": "Autorizado"}
+      },
+      "last_user": {"name": "Último usuário"},
+      "verify_mode": {"name": "Último método"}
     }
   }
 }

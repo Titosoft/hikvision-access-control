@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 
 @dataclass(slots=True)
@@ -27,10 +27,12 @@ class HikvisionMultipartParser:
         self._buffer = bytearray()
 
     @classmethod
-    def from_content_type(cls, content_type: str | None) -> "HikvisionMultipartParser":
+    def from_content_type(cls, content_type: str | None) -> HikvisionMultipartParser:
         """Build a parser using a boundary from Content-Type."""
         if content_type:
-            match = re.search(r"boundary\s*=\s*(?:\"([^\"]+)\"|([^;\s]+))", content_type)
+            match = re.search(
+                r"boundary\s*=\s*(?:\"([^\"]+)\"|([^;\s]+))", content_type
+            )
             if match:
                 return cls((match.group(1) or match.group(2)).encode())
         return cls()
@@ -53,7 +55,10 @@ class HikvisionMultipartParser:
             if self._buffer[header_start : header_start + 2] == b"--":
                 self._buffer.clear()
                 break
-            while len(self._buffer) > header_start and self._buffer[header_start] in (10, 13):
+            while len(self._buffer) > header_start and self._buffer[header_start] in (
+                10,
+                13,
+            ):
                 header_start += 1
 
             header_end, separator_length = self._find_header_end(header_start)
@@ -64,10 +69,14 @@ class HikvisionMultipartParser:
             try:
                 content_length = int(headers["content-length"])
             except (KeyError, ValueError):
-                next_boundary = self._buffer.find(self._boundary, header_end + separator_length)
+                next_boundary = self._buffer.find(
+                    self._boundary, header_end + separator_length
+                )
                 if next_boundary < 0:
                     break
-                body = bytes(self._buffer[header_end + separator_length : next_boundary]).rstrip(b"\r\n")
+                body = bytes(
+                    self._buffer[header_end + separator_length : next_boundary]
+                ).rstrip(b"\r\n")
                 del self._buffer[:next_boundary]
                 parts.append(MultipartPart(headers, body))
                 continue

@@ -22,6 +22,7 @@ async def async_get_config_entry_diagnostics(
             "firmware": api.firmware_version,
             "available": api.available,
         },
-        "last_event": async_redact_data(dict(api.last_event or {}), {"name", "employee_id"}),
+        "last_event": async_redact_data(
+            dict(api.last_event or {}), {"name", "employee_id"}
+        ),
     }
-

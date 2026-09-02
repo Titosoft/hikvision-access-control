@@ -5,12 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME, Platform
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+    Platform,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .api import HikvisionAccessAPI, HikvisionApiError, HikvisionAuthError
-from .const import CONF_DEVICE_NAME, CONF_USE_HTTPS, CONF_VERIFY_SSL, DOMAIN
+from .const import CONF_DEVICE_NAME, CONF_USE_HTTPS, CONF_VERIFY_SSL
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from asyncio import AbstractEventLoop
-from collections.abc import Callable
-from datetime import datetime
 import json
 import logging
 import threading
-from typing import Any
 import xml.etree.ElementTree as ET
+from asyncio import AbstractEventLoop
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 import requests
 from requests.auth import HTTPDigestAuth
@@ -65,6 +65,7 @@ class HikvisionAccessAPI:
         self.latest_picture_time: datetime | None = None
 
         self._listeners: set[Callable[[], None]] = set()
+        self._listeners_lock = threading.Lock()
         self._loop: AbstractEventLoop | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -74,10 +75,12 @@ class HikvisionAccessAPI:
 
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Register a state listener."""
-        self._listeners.add(listener)
+        with self._listeners_lock:
+            self._listeners.add(listener)
 
         def remove_listener() -> None:
-            self._listeners.discard(listener)
+            with self._listeners_lock:
+                self._listeners.discard(listener)
 
         return remove_listener
 
@@ -86,7 +89,9 @@ class HikvisionAccessAPI:
             return
         if self._loop.is_closed():
             return
-        for listener in tuple(self._listeners):
+        with self._listeners_lock:
+            listeners = tuple(self._listeners)
+        for listener in listeners:
             try:
                 self._loop.call_soon_threadsafe(listener)
             except RuntimeError:
@@ -100,7 +105,9 @@ class HikvisionAccessAPI:
         except ET.ParseError as err:
             raise HikvisionApiError("Invalid device information response") from err
 
-        values = {element.tag.rsplit("}", 1)[-1]: element.text for element in root.iter()}
+        values = {
+            element.tag.rsplit("}", 1)[-1]: element.text for element in root.iter()
+        }
         self.model = values.get("model") or values.get("deviceType") or self.model
         self.serial_number = values.get("serialNumber")
         self.mac_address = values.get("macAddress")
@@ -176,7 +183,7 @@ class HikvisionAccessAPI:
             response.raise_for_status()
         except requests.HTTPError as err:
             raise HikvisionApiError(
-                f"ISAPI returned HTTP {response.status_code}: {response.text[:200]}"
+                f"ISAPI returned HTTP {response.status_code}"
             ) from err
         return response
 
@@ -189,7 +196,9 @@ class HikvisionAccessAPI:
                     break
                 raise HikvisionApiError("Event stream ended unexpectedly")
             except HikvisionAuthError:
-                _LOGGER.error("Authentication failed for Hikvision terminal %s", self.host)
+                _LOGGER.error(
+                    "Authentication failed for Hikvision terminal %s", self.host
+                )
                 self._set_available(False)
                 return
             except (HikvisionApiError, requests.RequestException, OSError) as err:
@@ -222,7 +231,9 @@ class HikvisionAccessAPI:
             if response.status_code in (401, 403):
                 raise HikvisionAuthError("Event-stream authentication failed")
             response.raise_for_status()
-            parser = HikvisionMultipartParser.from_content_type(response.headers.get("Content-Type"))
+            parser = HikvisionMultipartParser.from_content_type(
+                response.headers.get("Content-Type")
+            )
             self._set_available(True)
             for chunk in response.iter_content(chunk_size=8192):
                 if self._stop.is_set():
@@ -252,7 +263,7 @@ class HikvisionAccessAPI:
                 self._handle_event(payload)
             return
 
-        if "image/jpeg" in content_type or "name=\"picture\"" in disposition:
+        if "image/jpeg" in content_type or 'name="picture"' in disposition:
             self.latest_picture = body
             self.latest_picture_time = datetime.now().astimezone()
             self._notify()

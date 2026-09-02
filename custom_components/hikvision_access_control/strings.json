@@ -3,25 +3,101 @@
   "config": {
     "step": {
       "user": {
-        "title": "Adicionar terminal Hikvision",
-        "description": "Conecta localmente ao terminal usando ISAPI e autenticação Digest.",
+        "title": "Add Hikvision terminal",
+        "description": "Connect locally using ISAPI and Digest authentication.",
         "data": {
-          "device_name": "Nome do dispositivo",
-          "host": "Endereço IP",
-          "port": "Porta",
-          "username": "Usuário",
-          "password": "Senha",
-          "use_https": "Usar HTTPS",
-          "verify_ssl": "Verificar certificado HTTPS"
+          "device_name": "Device name",
+          "host": "IP address",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "use_https": "Use HTTPS",
+          "verify_ssl": "Verify HTTPS certificate"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Hikvision terminal",
+        "description": "Update the local ISAPI connection settings.",
+        "data": {
+          "device_name": "Device name",
+          "host": "IP address",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "use_https": "Use HTTPS",
+          "verify_ssl": "Verify HTTPS certificate"
+        },
+        "data_description": {
+          "password": "Leave blank to keep the current password."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Hikvision terminal",
+        "description": "Enter credentials with permission to access ISAPI.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
         }
       }
     },
     "error": {
-      "cannot_connect": "Não foi possível conectar ao terminal.",
-      "invalid_auth": "Usuário, senha ou permissões inválidos."
+      "cannot_connect": "Cannot connect to the terminal.",
+      "invalid_auth": "Invalid username, password, or permissions."
     },
     "abort": {
-      "already_configured": "Este terminal já está configurado."
+      "already_configured": "This terminal is already configured.",
+      "reauth_successful": "Reauthentication was successful.",
+      "reconfigure_successful": "Reconfiguration was successful.",
+      "unique_id_mismatch": "The settings identify a different terminal."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "relay_unlocked": {"name": "Opening relay"}
+    },
+    "button": {
+      "open_door": {"name": "Open gate"}
+    },
+    "camera": {
+      "last_access_picture": {"name": "Last access picture"}
+    },
+    "event": {
+      "access_event": {
+        "name": "Access event",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "door_locked": "Relay locked",
+              "door_unlocked": "Relay unlocked",
+              "face_authenticated": "Face authentication authorized",
+              "unknown_access_event": "Unknown access event"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "connection": {
+        "name": "ISAPI connection",
+        "state": {"offline": "Offline", "online": "Online"}
+      },
+      "employee_id": {"name": "Last user ID"},
+      "last_access_time": {"name": "Last access time"},
+      "last_event": {
+        "name": "Last event",
+        "state": {
+          "door_locked": "Relay locked",
+          "door_unlocked": "Relay unlocked",
+          "face_authenticated": "Face authentication authorized",
+          "unknown_access_event": "Unknown access event"
+        }
+      },
+      "last_result": {
+        "name": "Last result",
+        "state": {"authorized": "Authorized"}
+      },
+      "last_user": {"name": "Last user"},
+      "verify_mode": {"name": "Last method"}
     }
   }
 }

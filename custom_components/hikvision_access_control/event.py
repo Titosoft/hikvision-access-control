@@ -47,6 +47,10 @@ class HikvisionAccessEvent(HikvisionAccessEntity, EventEntity):
         event_type = event.get("event", "unknown_access_event")
         if event_type not in EVENT_TYPES:
             event_type = "unknown_access_event"
-        attributes = {key: value for key, value in event.items() if key != "event" and value is not None}
+        attributes = {
+            key: value
+            for key, value in event.items()
+            if key != "event" and value is not None
+        }
         self._trigger_event(event_type, attributes)
         self.async_write_ha_state()

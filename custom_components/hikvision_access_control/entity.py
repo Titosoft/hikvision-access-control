@@ -25,9 +25,8 @@ class HikvisionAccessEntity(Entity):
             model=api.model,
             serial_number=api.serial_number,
             sw_version=api.firmware_version,
-            connections={
-                (dr.CONNECTION_NETWORK_MAC, dr.format_mac(api.mac_address))
-            }
+            configuration_url=api.base_url,
+            connections={(dr.CONNECTION_NETWORK_MAC, dr.format_mac(api.mac_address))}
             if api.mac_address
             else set(),
         )

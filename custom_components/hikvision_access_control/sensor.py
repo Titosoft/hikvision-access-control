@@ -12,7 +12,10 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import HikvisionConfigEntry
+from .const import EVENT_LABELS
 from .entity import HikvisionAccessEntity
+
+EVENT_OPTIONS = sorted(set(EVENT_LABELS.values()) | {"unknown_access_event"})
 
 
 async def async_setup_entry(
@@ -39,6 +42,8 @@ class HikvisionConnectionSensor(HikvisionAccessEntity, SensorEntity):
     """Connection status sensor."""
 
     _attr_translation_key = "connection"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["offline", "online"]
     _attr_icon = "mdi:lan-connect"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -68,7 +73,9 @@ class HikvisionLastAuthSensor(HikvisionAccessEntity, SensorEntity):
         if not self.api.last_auth:
             return None
         if self._key == "last_user":
-            return self.api.last_auth.get("name") or self.api.last_auth.get("employee_id") or "Desconhecido"
+            return self.api.last_auth.get("name") or self.api.last_auth.get(
+                "employee_id"
+            )
         return self.api.last_auth.get(self._key)
 
 
@@ -76,6 +83,8 @@ class HikvisionResultSensor(HikvisionAccessEntity, SensorEntity):
     """Expose the result of the latest confirmed authentication event."""
 
     _attr_translation_key = "last_result"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["authorized"]
     _attr_icon = "mdi:shield-account"
 
     def __init__(self, api) -> None:
@@ -113,6 +122,8 @@ class HikvisionLastEventSensor(HikvisionAccessEntity, SensorEntity):
     """Expose the latest access-control event and its metadata."""
 
     _attr_translation_key = "last_event"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = EVENT_OPTIONS
     _attr_icon = "mdi:door"
 
     def __init__(self, api) -> None:
