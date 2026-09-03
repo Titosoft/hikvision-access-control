@@ -1,13 +1,13 @@
 {
   "domain": "hikvision_access_control",
   "name": "Hikvision Access Control",
-  "codeowners": ["@titogarrido"],
+  "codeowners": ["@Titosoft"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/titogarrido/ha-hikvision-access-control#readme",
+  "documentation": "https://github.com/Titosoft/hikvision-access-control#readme",
   "integration_type": "device",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/titogarrido/ha-hikvision-access-control/issues",
+  "issue_tracker": "https://github.com/Titosoft/hikvision-access-control/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

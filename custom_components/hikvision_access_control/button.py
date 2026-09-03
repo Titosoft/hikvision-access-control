@@ -16,7 +16,9 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the open-door button."""
-    async_add_entities([HikvisionOpenDoorButton(entry.runtime_data.api)])
+    api = entry.runtime_data.api
+    if api.door_control_supported is not False:
+        async_add_entities([HikvisionOpenDoorButton(api)])
 
 
 class HikvisionOpenDoorButton(HikvisionAccessEntity, ButtonEntity):

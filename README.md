@@ -14,7 +14,7 @@ porta 8000.
 - Controlador seguro associado informado: **DS-K2M062**.
 - Transporte: HTTPS/ISAPI na porta 443 com autenticação HTTP Digest.
 - Ambiente-alvo: Home Assistant OS 18.2 e Home Assistant Core 2026.8.3.
-- Os testes automatizados cobrem parser multipart JSON/JPEG fragmentado,
+- Os testes automatizados cobrem parser multipart XML/JSON/JPEG fragmentado,
   autenticação Digest, reconexão do `alertStream` e encerramento do cliente.
 
 O preparo desta versão não incluiu acesso a um equipamento físico. Portanto, a
@@ -28,7 +28,7 @@ dispositivo no Home Assistant.
 
 | Plataforma | Entidade | Função |
 | --- | --- | --- |
-| Button | Abrir portão | Pulsa a porta 1 por ISAPI |
+| Button | Abrir portão | Pulsa a porta 1 por ISAPI quando o dispositivo anuncia essa capacidade |
 | Event | Evento de acesso | Emite autenticações e alterações confirmadas do relé |
 | Sensor | Último usuário | Nome ou matrícula do último acesso autorizado |
 | Sensor | Matrícula do último usuário | Identificador recebido do terminal |
@@ -38,13 +38,18 @@ dispositivo no Home Assistant.
 | Sensor | Último evento | Tipo e metadados do último evento recebido |
 | Sensor | Conexão ISAPI | Estado `online`/`offline` do `alertStream` |
 | Binary sensor | Relé de abertura | Último estado lógico de travamento/destravamento |
-| Camera | Foto do último acesso | Último JPEG recebido no multipart, mantido em memória |
+| Camera | Foto do último acesso | Última parte `Picture` ligada a um acesso, sem substituir pela imagem térmica |
 
 Mapeamentos confirmados pelas amostras descritas para o DS-K1T344:
 
 - `majorEventType: 5`, `subEventType: 75`: autenticação facial autorizada.
 - `majorEventType: 5`, `subEventType: 21`: relé/fechadura destravado.
 - `majorEventType: 5`, `subEventType: 22`: relé/fechadura travado.
+
+Também são classificados os eventos de autenticação bem-sucedida documentados
+pela Hikvision para cartão, cartão e PIN, digital, combinações de face e outros
+fatores, PIN e autenticação combinada. O campo `currentVerifyMode` recebido do
+terminal continua sendo exposto como o método do último acesso.
 
 Outros códigos são publicados como `unknown_access_event`; não são classificados
 sem documentação ou amostra real.
@@ -59,7 +64,7 @@ sem documentação ou amostra real.
 2. Entre em **Integrações**.
 3. Abra o menu no canto superior direito e escolha **Repositórios personalizados**.
 4. Em **Repositório**, informe
-   `https://github.com/titogarrido/ha-hikvision-access-control`.
+   `https://github.com/Titosoft/hikvision-access-control`.
 5. Em **Categoria**, selecione **Integração** e clique em **Adicionar**.
 6. Procure por **Hikvision Access Control** no HACS e clique em **Baixar**.
 7. Reinicie o Home Assistant.
@@ -96,6 +101,7 @@ Crie no terminal um usuário local dedicado, com o menor privilégio possível. 
 precisa conseguir:
 
 - ler `/ISAPI/System/deviceInfo`;
+- ler `/ISAPI/AccessControl/RemoteControl/door/capabilities` para anunciar o botão;
 - ler continuamente `/ISAPI/Event/notification/alertStream`;
 - executar `PUT /ISAPI/AccessControl/RemoteControl/door/1` para usar o botão.
 
@@ -146,9 +152,9 @@ mode: queued
 
 ## Publicando uma nova versão
 
-Para publicar `0.1.1`, atualize `version` no `manifest.json` e o `CHANGELOG.md`,
+Para publicar uma nova versão, atualize `version` no `manifest.json` e o `CHANGELOG.md`,
 execute os testes, faça commit e envie a branch `main`. Depois crie a tag anotada
-`v0.1.1`, envie a tag e publique uma GitHub Release chamada `v0.1.1`. Não é
+com o mesmo número da versão, envie a tag e publique uma GitHub Release. Não é
 necessário gerar ZIP personalizado: o HACS instala diretamente
 `custom_components/hikvision_access_control` do código-fonte da release.
 
@@ -157,6 +163,8 @@ necessário gerar ZIP personalizado: o HACS instala diretamente
 - [Publicação de integrações no HACS](https://hacs.xyz/docs/publish/integration/)
 - [Manifesto de integrações do Home Assistant](https://developers.home-assistant.io/docs/creating_integration_manifest/)
 - [Imagens locais para integrações personalizadas](https://developers.home-assistant.io/docs/core/integration/brand_images/)
+- [Portal oficial de guias ISAPI da Hikvision](https://tpp.hikvision.com/download/ISAPI_OTAP?type=1)
+- [Eventos oficiais de controle de acesso Hikvision](https://open.hikvision.com/hardware/v2/%E7%BB%93%E6%9E%84%E4%BD%93/NET_DVR_ACS_ALARM_INFO.html)
 
 ## Licença
 

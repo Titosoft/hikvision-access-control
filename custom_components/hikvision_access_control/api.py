@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import xml.etree.ElementTree as ET
 from asyncio import AbstractEventLoop
@@ -22,6 +23,17 @@ _LOGGER = logging.getLogger(__name__)
 
 class HikvisionApiError(Exception):
     """Raised when an ISAPI request fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        isapi_status: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.isapi_status = isapi_status
 
 
 class HikvisionAuthError(HikvisionApiError):
@@ -61,8 +73,10 @@ class HikvisionAccessAPI:
         self.last_auth: dict[str, Any] | None = None
         self.last_result: str | None = None
         self.relay_unlocked: bool | None = None
+        self.door_control_supported: bool | None = None
         self.latest_picture: bytes | None = None
         self.latest_picture_time: datetime | None = None
+        self._pending_picture_parts = 0
 
         self._listeners: set[Callable[[], None]] = set()
         self._listeners_lock = threading.Lock()
@@ -118,8 +132,31 @@ class HikvisionAccessAPI:
         elif reported_name:
             self.device_name = reported_name
         self.unique_id = self.serial_number or self.mac_address or self.host
+        self._discover_door_control_capabilities()
         self.available = True
         return values
+
+    def _discover_door_control_capabilities(self) -> None:
+        """Discover whether the device exposes the documented door control API."""
+        try:
+            self._request(
+                "GET",
+                "/ISAPI/AccessControl/RemoteControl/door/capabilities",
+                timeout=15,
+            )
+        except HikvisionAuthError:
+            self.door_control_supported = None
+            _LOGGER.warning(
+                "The Hikvision user cannot read remote door control capabilities"
+            )
+        except HikvisionApiError as err:
+            if err.http_status in (404, 405, 501) or err.isapi_status == "4":
+                self.door_control_supported = False
+            else:
+                self.door_control_supported = None
+            _LOGGER.debug("Could not read remote door control capabilities: %s", err)
+        else:
+            self.door_control_supported = True
 
     def start(self, loop: AbstractEventLoop) -> None:
         """Start the background event stream."""
@@ -183,9 +220,40 @@ class HikvisionAccessAPI:
             response.raise_for_status()
         except requests.HTTPError as err:
             raise HikvisionApiError(
-                f"ISAPI returned HTTP {response.status_code}"
+                f"ISAPI returned HTTP {response.status_code}",
+                http_status=response.status_code,
             ) from err
+        self._validate_response_status(response)
         return response
+
+    @staticmethod
+    def _validate_response_status(response: requests.Response) -> None:
+        """Raise when an XML ResponseStatus reports an application-level error."""
+        content = response.content.lstrip()
+        if not content.startswith(b"<"):
+            return
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            return
+        if HikvisionAccessAPI._local_name(root.tag) != "ResponseStatus":
+            return
+
+        values = {
+            HikvisionAccessAPI._local_name(element.tag): (element.text or "").strip()
+            for element in root.iter()
+        }
+        status_code = values.get("statusCode")
+        status_string = values.get("statusString", "Unknown error")
+        sub_status = values.get("subStatusCode")
+        if status_code in ("0", "1") and status_string.casefold() == "ok":
+            return
+
+        detail = f": {sub_status}" if sub_status else ""
+        raise HikvisionApiError(
+            f"ISAPI returned {status_string}{detail}",
+            isapi_status=status_code,
+        )
 
     def _stream_forever(self) -> None:
         delay = 2
@@ -253,20 +321,64 @@ class HikvisionAccessAPI:
     def _handle_part(self, headers: dict[str, str], body: bytes) -> None:
         content_type = headers.get("content-type", "").lower()
         disposition = headers.get("content-disposition", "").lower()
+        if "xml" in content_type or body.lstrip().startswith(b"<"):
+            try:
+                root = ET.fromstring(body)
+            except ET.ParseError:
+                _LOGGER.debug("Ignored malformed XML event part")
+                return
+            payload = self._xml_event_payload(root)
+            if payload is not None:
+                self._handle_event_payload(payload)
+            return
+
         if "application/json" in content_type or "accesscontrollerevent" in disposition:
             try:
                 payload = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 _LOGGER.debug("Ignored malformed JSON event part")
                 return
-            if payload.get("eventType") == "AccessControllerEvent":
-                self._handle_event(payload)
+            self._handle_event_payload(payload)
             return
 
-        if "image/jpeg" in content_type or 'name="picture"' in disposition:
+        if "image/jpeg" in content_type:
+            if self._pending_picture_parts <= 0:
+                return
+            self._pending_picture_parts -= 1
+            content_id = headers.get("content-id", "").lower()
+            if "thermal" in disposition or "thermal" in content_id:
+                return
+            name_match = re.search(r'name\s*=\s*"?([^";]+)', disposition)
+            if name_match and name_match.group(1).strip() != "picture":
+                return
             self.latest_picture = body
             self.latest_picture_time = datetime.now().astimezone()
             self._notify()
+
+    def _handle_event_payload(self, payload: dict[str, Any]) -> None:
+        """Route one decoded ISAPI event payload."""
+        if payload.get("eventType") == "AccessControllerEvent":
+            self._handle_event(payload)
+        else:
+            self._pending_picture_parts = 0
+
+    @staticmethod
+    def _xml_event_payload(root: ET.Element) -> dict[str, Any] | None:
+        """Convert an XML EventNotificationAlert access event to the JSON shape."""
+        if HikvisionAccessAPI._local_name(root.tag) != "EventNotificationAlert":
+            return None
+
+        payload: dict[str, Any] = {}
+        for child in root:
+            name = HikvisionAccessAPI._local_name(child.tag)
+            if name == "AccessControllerEvent":
+                payload[name] = {
+                    HikvisionAccessAPI._local_name(item.tag): item.text
+                    for item in child
+                }
+            elif len(child) == 0:
+                payload[name] = child.text
+        return payload
 
     def _handle_event(self, payload: dict[str, Any]) -> None:
         detail = payload.get("AccessControllerEvent") or {}
@@ -287,6 +399,8 @@ class HikvisionAccessAPI:
             "mask": detail.get("mask"),
             "pictures_number": detail.get("picturesNumber", 0),
         }
+        pictures_number = self._to_int(normalized["pictures_number"]) or 0
+        self._pending_picture_parts = max(pictures_number, 0)
         self.last_event = normalized
 
         if event_code == (5, 21):
@@ -312,3 +426,8 @@ class HikvisionAccessAPI:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _local_name(tag: str) -> str:
+        """Return an XML tag without its namespace."""
+        return tag.rsplit("}", 1)[-1]

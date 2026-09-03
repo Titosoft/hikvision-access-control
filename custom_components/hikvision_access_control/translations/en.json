@@ -67,9 +67,18 @@
         "state_attributes": {
           "event_type": {
             "state": {
+              "card_authenticated": "Card authentication authorized",
+              "card_pin_authenticated": "Card and PIN authentication authorized",
+              "combined_authenticated": "Combined authentication authorized",
               "door_locked": "Relay locked",
               "door_unlocked": "Relay unlocked",
+              "face_card_authenticated": "Face and card authentication authorized",
               "face_authenticated": "Face authentication authorized",
+              "face_fingerprint_authenticated": "Face and fingerprint authentication authorized",
+              "face_pin_authenticated": "Face and PIN authentication authorized",
+              "fingerprint_authenticated": "Fingerprint authentication authorized",
+              "multi_factor_authenticated": "Multi-factor authentication authorized",
+              "pin_authenticated": "PIN authentication authorized",
               "unknown_access_event": "Unknown access event"
             }
           }
@@ -86,9 +95,18 @@
       "last_event": {
         "name": "Last event",
         "state": {
+          "card_authenticated": "Card authentication authorized",
+          "card_pin_authenticated": "Card and PIN authentication authorized",
+          "combined_authenticated": "Combined authentication authorized",
           "door_locked": "Relay locked",
           "door_unlocked": "Relay unlocked",
+          "face_card_authenticated": "Face and card authentication authorized",
           "face_authenticated": "Face authentication authorized",
+          "face_fingerprint_authenticated": "Face and fingerprint authentication authorized",
+          "face_pin_authenticated": "Face and PIN authentication authorized",
+          "fingerprint_authenticated": "Fingerprint authentication authorized",
+          "multi_factor_authenticated": "Multi-factor authentication authorized",
+          "pin_authenticated": "PIN authentication authorized",
           "unknown_access_event": "Unknown access event"
         }
       },

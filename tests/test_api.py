@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import pytest
 import requests
 from requests.auth import HTTPDigestAuth
 
@@ -133,7 +134,7 @@ def _multipart_payload() -> tuple[bytes, bytes, bytes]:
 
 
 def test_device_info_uses_digest_auth(monkeypatch) -> None:
-    response = FakeResponse(
+    device_response = FakeResponse(
         content=(
             b'<DeviceInfo xmlns="http://www.isapi.org/ver20/XMLSchema">'
             b"<deviceName>Terminal</deviceName><model>DS-K1T344MX-E1</model>"
@@ -141,23 +142,56 @@ def test_device_info_uses_digest_auth(monkeypatch) -> None:
             b"<firmwareVersion>V1.0.0</firmwareVersion></DeviceInfo>"
         )
     )
-    captured: dict[str, Any] = {}
+    capability_response = FakeResponse(
+        content=(
+            b'<RemoteControlDoorCap xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            b"<isSupport>true</isSupport></RemoteControlDoorCap>"
+        )
+    )
+    captured: list[dict[str, Any]] = []
 
     def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
-        captured.update({"method": method, "url": url, **kwargs})
-        return response
+        captured.append({"method": method, "url": url, **kwargs})
+        if url.endswith("/ISAPI/System/deviceInfo"):
+            return device_response
+        return capability_response
 
     monkeypatch.setattr(API_MODULE.requests, "request", fake_request)
     api = _api()
 
     api.get_device_info()
 
-    assert captured["method"] == "GET"
-    assert captured["url"].endswith("/ISAPI/System/deviceInfo")
-    assert isinstance(captured["auth"], HTTPDigestAuth)
-    assert captured["auth"].username == "isapi-user"
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith("/ISAPI/System/deviceInfo")
+    assert isinstance(captured[0]["auth"], HTTPDigestAuth)
+    assert captured[0]["auth"].username == "isapi-user"
+    assert captured[1]["url"].endswith(
+        "/ISAPI/AccessControl/RemoteControl/door/capabilities"
+    )
+    assert api.door_control_supported is True
     assert api.unique_id == "TEST-SERIAL"
     assert api.model == "DS-K1T344MX-E1"
+
+
+def test_missing_door_capability_is_recorded(monkeypatch) -> None:
+    device_response = FakeResponse(
+        content=(
+            b'<DeviceInfo xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            b"<serialNumber>TEST-SERIAL</serialNumber></DeviceInfo>"
+        )
+    )
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        if url.endswith("/ISAPI/System/deviceInfo"):
+            return device_response
+        return FakeResponse(status_code=404)
+
+    monkeypatch.setattr(API_MODULE.requests, "request", fake_request)
+    api = _api()
+
+    api.get_device_info()
+
+    assert api.door_control_supported is False
 
 
 def test_authentication_error_is_distinct(monkeypatch) -> None:
@@ -173,6 +207,39 @@ def test_authentication_error_is_distinct(monkeypatch) -> None:
         pass
     else:
         raise AssertionError("HTTP 401 must raise HikvisionAuthError")
+
+
+def test_open_door_validates_isapi_response_status(monkeypatch) -> None:
+    response = FakeResponse(
+        content=(
+            b'<ResponseStatus xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            b"<statusCode>4</statusCode>"
+            b"<statusString>Invalid Operation</statusString>"
+            b"<subStatusCode>methodNotAllowed</subStatusCode>"
+            b"</ResponseStatus>"
+        )
+    )
+    monkeypatch.setattr(
+        API_MODULE.requests, "request", lambda *args, **kwargs: response
+    )
+
+    with pytest.raises(HikvisionApiError, match="methodNotAllowed"):
+        _api().open_door()
+
+
+def test_open_door_accepts_successful_isapi_response(monkeypatch) -> None:
+    response = FakeResponse(
+        content=(
+            b'<ResponseStatus xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            b"<statusCode>1</statusCode><statusString>OK</statusString>"
+            b"<subStatusCode>ok</subStatusCode></ResponseStatus>"
+        )
+    )
+    monkeypatch.setattr(
+        API_MODULE.requests, "request", lambda *args, **kwargs: response
+    )
+
+    _api().open_door()
 
 
 def test_fragmented_alert_stream_decodes_json_and_jpeg(monkeypatch) -> None:
@@ -220,6 +287,88 @@ def test_only_confirmed_major_and_sub_event_pairs_are_classified() -> None:
     )
     assert api.last_event["event"] == "door_unlocked"
     assert api.relay_unlocked is True
+
+
+def test_documented_card_and_pin_events_are_authorized() -> None:
+    api = _api()
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {"majorEventType": 5, "subEventType": 1},
+        }
+    )
+    assert api.last_auth["event"] == "card_authenticated"
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {"majorEventType": 5, "subEventType": 101},
+        }
+    )
+    assert api.last_auth["event"] == "pin_authenticated"
+
+
+def test_xml_access_event_is_decoded() -> None:
+    api = _api()
+    body = (
+        b'<EventNotificationAlert xmlns="http://www.isapi.org/ver20/XMLSchema">'
+        b"<dateTime>2026-09-02T12:00:00-03:00</dateTime>"
+        b"<eventType>AccessControllerEvent</eventType>"
+        b"<AccessControllerEvent><majorEventType>5</majorEventType>"
+        b"<subEventType>75</subEventType><employeeNoString>123</employeeNoString>"
+        b"<name>Example User</name><picturesNumber>1</picturesNumber>"
+        b"</AccessControllerEvent></EventNotificationAlert>"
+    )
+
+    api._handle_part({"content-type": "application/xml"}, body)
+
+    assert api.last_auth["event"] == "face_authenticated"
+    assert api.last_auth["employee_id"] == "123"
+    assert api.last_auth["name"] == "Example User"
+
+
+def test_thermal_image_does_not_replace_visible_access_picture() -> None:
+    api = _api()
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 75,
+                "picturesNumber": 2,
+            },
+        }
+    )
+    visible = b"visible-jpeg"
+    thermal = b"thermal-jpeg"
+
+    api._handle_part(
+        {
+            "content-type": "image/jpeg",
+            "content-disposition": 'form-data; name="Picture"',
+            "content-id": "pictureImage",
+        },
+        visible,
+    )
+    api._handle_part(
+        {
+            "content-type": "image/jpeg",
+            "content-disposition": 'form-data; name="Thermal"',
+            "content-id": "thermal_image",
+        },
+        thermal,
+    )
+
+    assert api.latest_picture == visible
+
+
+def test_unrelated_jpeg_is_not_used_as_access_picture() -> None:
+    api = _api()
+
+    api._handle_part({"content-type": "image/jpeg"}, b"unrelated-jpeg")
+
+    assert api.latest_picture is None
 
 
 def test_stream_reconnects_after_disconnect() -> None:
