@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-09-07
+
+### Added
+
+- Official access-control doorbell event `majorEventType: 5`, `subEventType: 37`.
+- Dedicated last-visitor camera for automations and notifications.
+- Visitor snapshot fallback through `/Streaming/channels/101/picture` when the
+  doorbell event does not include a JPEG attachment.
+
+### Fixed
+
+- Delay the doorbell event until its attached image or snapshot fallback is ready,
+  allowing notification automations to use the current visitor picture.
+- Suppress repeated notifications for the same doorbell event serial number or
+  timestamp.
+
 ## [0.1.1] - 2026-09-02
 
 ### Added
@@ -38,5 +54,6 @@ All notable changes to this project will be documented in this file.
 - Only event mappings confirmed by the supplied DS-K1T344 observations are
   classified.
 
+[0.1.2]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Titosoft/hikvision-access-control/releases/tag/v0.1.0

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import threading
+import time
 import xml.etree.ElementTree as ET
 from asyncio import AbstractEventLoop
 from collections.abc import Callable
@@ -19,6 +20,11 @@ from .const import AUTH_SUCCESS_EVENTS, EVENT_LABELS
 from .parser import HikvisionMultipartParser
 
 _LOGGER = logging.getLogger(__name__)
+
+DOORBELL_EVENT = (5, 37)
+DOORBELL_DEDUPLICATION_SECONDS = 5
+DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
+SNAPSHOT_PATH = "/Streaming/channels/101/picture"
 
 
 class HikvisionApiError(Exception):
@@ -76,7 +82,17 @@ class HikvisionAccessAPI:
         self.door_control_supported: bool | None = None
         self.latest_picture: bytes | None = None
         self.latest_picture_time: datetime | None = None
+        self.latest_visitor_picture: bytes | None = None
+        self.latest_visitor_picture_time: datetime | None = None
         self._pending_picture_parts = 0
+        self._pending_picture_target: str | None = None
+
+        self._visitor_lock = threading.Lock()
+        self._visitor_snapshot_timer: threading.Timer | None = None
+        self._visitor_snapshot_token: object | None = None
+        self._visitor_pending_event: dict[str, Any] | None = None
+        self._last_doorbell_identity: tuple[str, str] | None = None
+        self._last_doorbell_seen = 0.0
 
         self._listeners: set[Callable[[], None]] = set()
         self._listeners_lock = threading.Lock()
@@ -174,6 +190,7 @@ class HikvisionAccessAPI:
     def stop(self) -> None:
         """Stop the event stream."""
         self._stop.set()
+        self._cancel_visitor_snapshot()
         with self._stream_lock:
             response = self._response
             session = self._session
@@ -345,15 +362,21 @@ class HikvisionAccessAPI:
             if self._pending_picture_parts <= 0:
                 return
             self._pending_picture_parts -= 1
+            picture_target = self._pending_picture_target
+            if self._pending_picture_parts == 0:
+                self._pending_picture_target = None
             content_id = headers.get("content-id", "").lower()
             if "thermal" in disposition or "thermal" in content_id:
                 return
             name_match = re.search(r'name\s*=\s*"?([^";]+)', disposition)
             if name_match and name_match.group(1).strip() != "picture":
                 return
-            self.latest_picture = body
-            self.latest_picture_time = datetime.now().astimezone()
-            self._notify()
+            if picture_target == "visitor":
+                self._finish_visitor_event(body, "event_attachment")
+            else:
+                self.latest_picture = body
+                self.latest_picture_time = datetime.now().astimezone()
+                self._notify()
 
     def _handle_event_payload(self, payload: dict[str, Any]) -> None:
         """Route one decoded ISAPI event payload."""
@@ -361,6 +384,7 @@ class HikvisionAccessAPI:
             self._handle_event(payload)
         else:
             self._pending_picture_parts = 0
+            self._pending_picture_target = None
 
     @staticmethod
     def _xml_event_payload(root: ET.Element) -> dict[str, Any] | None:
@@ -385,6 +409,11 @@ class HikvisionAccessAPI:
         sub_event = self._to_int(detail.get("subEventType"))
         major_event = self._to_int(detail.get("majorEventType"))
         event_code = (major_event, sub_event)
+        if event_code == DOORBELL_EVENT and self._is_duplicate_doorbell(
+            payload, detail
+        ):
+            _LOGGER.debug("Ignored duplicate doorbell notification")
+            return
         normalized = {
             "event": EVENT_LABELS.get(event_code, "unknown_access_event"),
             "major": major_event,
@@ -398,9 +427,15 @@ class HikvisionAccessAPI:
             "user_type": detail.get("userType"),
             "mask": detail.get("mask"),
             "pictures_number": detail.get("picturesNumber", 0),
+            "active_post_count": payload.get("activePostCount"),
         }
         pictures_number = self._to_int(normalized["pictures_number"]) or 0
         self._pending_picture_parts = max(pictures_number, 0)
+        self._pending_picture_target = (
+            "visitor" if event_code == DOORBELL_EVENT else "access"
+        )
+        if self._pending_picture_parts == 0:
+            self._pending_picture_target = None
         self.last_event = normalized
 
         if event_code == (5, 21):
@@ -412,7 +447,116 @@ class HikvisionAccessAPI:
             self.last_auth = normalized
             self.last_result = "authorized"
 
+        if event_code == DOORBELL_EVENT:
+            normalized["picture_available"] = False
+            normalized["picture_source"] = None
+            self._schedule_visitor_snapshot(normalized)
+            return
+
         self._notify()
+
+    def _is_duplicate_doorbell(
+        self, payload: dict[str, Any], detail: dict[str, Any]
+    ) -> bool:
+        """Suppress repeated active-post notifications for one button press."""
+        serial_no = detail.get("serialNo")
+        date_time = payload.get("dateTime")
+        if serial_no not in (None, "", 0, "0"):
+            identity = ("serial", str(serial_no))
+        elif date_time:
+            identity = ("time", f"{date_time}:{detail.get('doorNo')}")
+        else:
+            return False
+
+        now = time.monotonic()
+        duplicate = (
+            identity == self._last_doorbell_identity
+            and now - self._last_doorbell_seen < DOORBELL_DEDUPLICATION_SECONDS
+        )
+        self._last_doorbell_identity = identity
+        self._last_doorbell_seen = now
+        return duplicate
+
+    def _schedule_visitor_snapshot(self, event: dict[str, Any]) -> None:
+        """Wait briefly for an attached JPEG, then request a live snapshot."""
+        token = object()
+        timer = threading.Timer(
+            DOORBELL_SNAPSHOT_DELAY_SECONDS,
+            self._capture_visitor_snapshot,
+            args=(token,),
+        )
+        timer.daemon = True
+        with self._visitor_lock:
+            previous_timer = self._visitor_snapshot_timer
+            previous_event = self._visitor_pending_event
+            self._visitor_snapshot_token = token
+            self._visitor_pending_event = event
+            self._visitor_snapshot_timer = timer
+        if previous_timer is not None:
+            previous_timer.cancel()
+        if previous_event is not None:
+            previous_event["picture_available"] = False
+            previous_event["picture_source"] = None
+            self.last_event = previous_event
+            self._notify()
+        timer.start()
+
+    def _capture_visitor_snapshot(self, token: object) -> None:
+        """Capture channel 101 when the doorbell event carried no JPEG."""
+        picture: bytes | None = None
+        try:
+            response = self._request(
+                "GET",
+                SNAPSHOT_PATH,
+                timeout=15,
+                headers={"Accept": "image/jpeg"},
+            )
+            if not response.content.startswith(b"\xff\xd8"):
+                raise HikvisionApiError("Snapshot response is not a JPEG image")
+            picture = response.content
+        except HikvisionApiError as err:
+            _LOGGER.warning("Could not capture doorbell visitor picture: %s", err)
+
+        self._finish_visitor_event(picture, "snapshot" if picture else None, token)
+
+    def _finish_visitor_event(
+        self,
+        picture: bytes | None,
+        source: str | None,
+        token: object | None = None,
+    ) -> None:
+        """Publish the doorbell event after its visitor image is resolved."""
+        with self._visitor_lock:
+            if token is not None and token is not self._visitor_snapshot_token:
+                return
+            event = self._visitor_pending_event
+            timer = self._visitor_snapshot_timer
+            self._visitor_snapshot_token = None
+            self._visitor_snapshot_timer = None
+            self._visitor_pending_event = None
+            if picture is not None:
+                self.latest_visitor_picture = picture
+                self.latest_visitor_picture_time = datetime.now().astimezone()
+        if timer is not None and timer is not threading.current_thread():
+            timer.cancel()
+        if event is None:
+            if picture is not None:
+                self._notify()
+            return
+        event["picture_available"] = picture is not None
+        event["picture_source"] = source
+        self.last_event = event
+        self._notify()
+
+    def _cancel_visitor_snapshot(self) -> None:
+        """Cancel an outstanding fallback snapshot without publishing it."""
+        with self._visitor_lock:
+            timer = self._visitor_snapshot_timer
+            self._visitor_snapshot_token = None
+            self._visitor_snapshot_timer = None
+            self._visitor_pending_event = None
+        if timer is not None:
+            timer.cancel()
 
     def _set_available(self, available: bool) -> None:
         if self.available == available:

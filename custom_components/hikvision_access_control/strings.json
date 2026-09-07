@@ -59,7 +59,8 @@
       "open_door": {"name": "Open gate"}
     },
     "camera": {
-      "last_access_picture": {"name": "Last access picture"}
+      "last_access_picture": {"name": "Last access picture"},
+      "last_visitor_picture": {"name": "Last visitor picture"}
     },
     "event": {
       "access_event": {
@@ -70,6 +71,7 @@
               "card_authenticated": "Card authentication authorized",
               "card_pin_authenticated": "Card and PIN authentication authorized",
               "combined_authenticated": "Combined authentication authorized",
+              "doorbell_ringing": "Doorbell ringing",
               "door_locked": "Relay locked",
               "door_unlocked": "Relay unlocked",
               "face_card_authenticated": "Face and card authentication authorized",
@@ -98,6 +100,7 @@
           "card_authenticated": "Card authentication authorized",
           "card_pin_authenticated": "Card and PIN authentication authorized",
           "combined_authenticated": "Combined authentication authorized",
+          "doorbell_ringing": "Doorbell ringing",
           "door_locked": "Relay locked",
           "door_unlocked": "Relay unlocked",
           "face_card_authenticated": "Face and card authentication authorized",

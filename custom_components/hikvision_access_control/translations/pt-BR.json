@@ -59,7 +59,8 @@
       "open_door": {"name": "Abrir portão"}
     },
     "camera": {
-      "last_access_picture": {"name": "Foto do último acesso"}
+      "last_access_picture": {"name": "Foto do último acesso"},
+      "last_visitor_picture": {"name": "Foto do último visitante"}
     },
     "event": {
       "access_event": {
@@ -70,6 +71,7 @@
               "card_authenticated": "Autenticação por cartão autorizada",
               "card_pin_authenticated": "Autenticação por cartão e PIN autorizada",
               "combined_authenticated": "Autenticação combinada autorizada",
+              "doorbell_ringing": "Campainha tocando",
               "door_locked": "Relé travado",
               "door_unlocked": "Relé destravado",
               "face_card_authenticated": "Autenticação por face e cartão autorizada",
@@ -98,6 +100,7 @@
           "card_authenticated": "Autenticação por cartão autorizada",
           "card_pin_authenticated": "Autenticação por cartão e PIN autorizada",
           "combined_authenticated": "Autenticação combinada autorizada",
+          "doorbell_ringing": "Campainha tocando",
           "door_locked": "Relé travado",
           "door_unlocked": "Relé destravado",
           "face_card_authenticated": "Autenticação por face e cartão autorizada",

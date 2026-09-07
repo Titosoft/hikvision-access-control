@@ -98,6 +98,30 @@ class InlineLoop:
         callback()
 
 
+class ControlledTimer:
+    """Timer substitute that only runs when a test explicitly fires it."""
+
+    created: list[ControlledTimer] = []
+
+    def __init__(self, interval: float, function, args: tuple[Any, ...]) -> None:
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+        self.created.append(self)
+
+    def start(self) -> None:
+        self.started = True
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def fire(self) -> None:
+        self.function(*self.args)
+
+
 def _api() -> Any:
     return HikvisionAccessAPI(
         host="192.168.1.100",
@@ -361,6 +385,144 @@ def test_thermal_image_does_not_replace_visible_access_picture() -> None:
     )
 
     assert api.latest_picture == visible
+
+
+def test_doorbell_attachment_becomes_visitor_picture(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    api._loop = InlineLoop()
+    updates: list[bool] = []
+    api.add_listener(lambda: updates.append(True))
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "dateTime": "2026-09-07T12:00:00-03:00",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 37,
+                "serialNo": 100,
+                "picturesNumber": 1,
+            },
+        }
+    )
+
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert updates == []
+    assert len(ControlledTimer.created) == 1
+
+    jpeg = b"\xff\xd8visitor-from-event\xff\xd9"
+    api._handle_part(
+        {
+            "content-type": "image/jpeg",
+            "content-disposition": 'form-data; name="Picture"',
+        },
+        jpeg,
+    )
+
+    assert api.latest_visitor_picture == jpeg
+    assert api.latest_picture is None
+    assert api.last_event["picture_available"] is True
+    assert api.last_event["picture_source"] == "event_attachment"
+    assert ControlledTimer.created[0].cancelled is True
+    assert updates == [True]
+
+
+def test_doorbell_without_attachment_uses_snapshot_fallback(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    captured: list[dict[str, Any]] = []
+    jpeg = b"\xff\xd8visitor-from-snapshot\xff\xd9"
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        captured.append({"method": method, "url": url, **kwargs})
+        return FakeResponse(content=jpeg, headers={"Content-Type": "image/jpeg"})
+
+    monkeypatch.setattr(API_MODULE.requests, "request", fake_request)
+    api = _api()
+    api._loop = InlineLoop()
+    updates: list[bool] = []
+    api.add_listener(lambda: updates.append(True))
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "dateTime": "2026-09-07T12:00:01-03:00",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 37,
+                "serialNo": 101,
+                "picturesNumber": 0,
+            },
+        }
+    )
+    ControlledTimer.created[0].fire()
+
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith("/Streaming/channels/101/picture")
+    assert isinstance(captured[0]["auth"], HTTPDigestAuth)
+    assert api.latest_visitor_picture == jpeg
+    assert api.last_event["picture_available"] is True
+    assert api.last_event["picture_source"] == "snapshot"
+    assert updates == [True]
+
+
+def test_doorbell_is_published_when_snapshot_fails(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    monkeypatch.setattr(
+        API_MODULE.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(status_code=404),
+    )
+    api = _api()
+    api._loop = InlineLoop()
+    updates: list[bool] = []
+    api.add_listener(lambda: updates.append(True))
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "dateTime": "2026-09-07T12:00:03-03:00",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 37,
+                "serialNo": 103,
+            },
+        }
+    )
+    ControlledTimer.created[0].fire()
+
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["picture_available"] is False
+    assert api.last_event["picture_source"] is None
+    assert api.latest_visitor_picture is None
+    assert updates == [True]
+
+
+def test_duplicate_doorbell_notification_is_suppressed(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    event = {
+        "eventType": "AccessControllerEvent",
+        "dateTime": "2026-09-07T12:00:02-03:00",
+        "activePostCount": 1,
+        "AccessControllerEvent": {
+            "majorEventType": 5,
+            "subEventType": 37,
+            "serialNo": 102,
+        },
+    }
+
+    api._handle_event(event)
+    first_event = api.last_event
+    event["activePostCount"] = 2
+    api._handle_event(event)
+
+    assert api.last_event is first_event
+    assert len(ControlledTimer.created) == 1
 
 
 def test_unrelated_jpeg_is_not_used_as_access_picture() -> None:

@@ -39,12 +39,14 @@ dispositivo no Home Assistant.
 | Sensor | Conexão ISAPI | Estado `online`/`offline` do `alertStream` |
 | Binary sensor | Relé de abertura | Último estado lógico de travamento/destravamento |
 | Camera | Foto do último acesso | Última parte `Picture` ligada a um acesso, sem substituir pela imagem térmica |
+| Camera | Foto do último visitante | Foto ligada ao último toque da campainha, usando o anexo do evento ou um snapshot |
 
 Mapeamentos confirmados pelas amostras descritas para o DS-K1T344:
 
 - `majorEventType: 5`, `subEventType: 75`: autenticação facial autorizada.
 - `majorEventType: 5`, `subEventType: 21`: relé/fechadura destravado.
 - `majorEventType: 5`, `subEventType: 22`: relé/fechadura travado.
+- `majorEventType: 5`, `subEventType: 37`: campainha/comunicador acionado.
 
 Também são classificados os eventos de autenticação bem-sucedida documentados
 pela Hikvision para cartão, cartão e PIN, digital, combinações de face e outros
@@ -103,6 +105,8 @@ precisa conseguir:
 - ler `/ISAPI/System/deviceInfo`;
 - ler `/ISAPI/AccessControl/RemoteControl/door/capabilities` para anunciar o botão;
 - ler continuamente `/ISAPI/Event/notification/alertStream`;
+- ler `/Streaming/channels/101/picture` para a foto do visitante quando o evento
+  da campainha não incluir uma imagem;
 - executar `PUT /ISAPI/AccessControl/RemoteControl/door/1` para usar o botão.
 
 Os nomes das permissões variam conforme o firmware. Habilite acesso ISAPI, leitura
@@ -132,6 +136,29 @@ actions:
 mode: queued
 ```
 
+Para avisar quando alguém tocar a campainha e anexar a foto mais recente, use o
+evento `doorbell_ringing`. O evento só é publicado depois que a imagem anexada ou
+o snapshot alternativo tiver sido processado:
+
+```yaml
+alias: Avisar visitante no portão
+triggers:
+  - trigger: state
+    entity_id: event.portao_social_evento_de_acesso
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.attributes.event_type == 'doorbell_ringing' }}
+actions:
+  - action: notify.mobile_app_seu_celular
+    data:
+      title: Alguém está no portão
+      message: A campainha foi acionada.
+      data:
+        image: /api/camera_proxy/camera.portao_social_foto_do_ultimo_visitante
+mode: queued
+```
+
 ## Solução de problemas
 
 - **A integração não aparece:** confirme o caminho exato da pasta e reinicie o
@@ -144,7 +171,8 @@ mode: queued
   `https://192.168.1.100:443`. O fluxo se reconecta automaticamente com espera
   progressiva de 2 a 30 segundos.
 - **Sem foto:** gere uma autenticação facial. Eventos de relé normalmente não
-  carregam JPEG.
+  carregam JPEG. Para a campainha, confirme também que o usuário ISAPI pode ler
+  `/Streaming/channels/101/picture`.
 - **Horário ausente:** confirme que o terminal envia `dateTime` válido e mantenha
   o fuso horário/NTP do dispositivo configurado.
 - **Portão não corresponde ao relé:** use um sensor magnético; a integração não
@@ -165,6 +193,7 @@ necessário gerar ZIP personalizado: o HACS instala diretamente
 - [Imagens locais para integrações personalizadas](https://developers.home-assistant.io/docs/core/integration/brand_images/)
 - [Portal oficial de guias ISAPI da Hikvision](https://tpp.hikvision.com/download/ISAPI_OTAP?type=1)
 - [Eventos oficiais de controle de acesso Hikvision](https://open.hikvision.com/hardware/v2/%E7%BB%93%E6%9E%84%E4%BD%93/NET_DVR_ACS_ALARM_INFO.html)
+- [Caminhos HTTP oficiais para snapshots Hikvision](https://www.hikvision.com/content/dam/hikvision/de/quick-start-guide/RTSP_und_HTTP_Pfade_fuer_Bilder_und_Videostreams_bei_IP-Kameras.pdf)
 
 ## Licença
 

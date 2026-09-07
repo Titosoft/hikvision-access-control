@@ -19,6 +19,7 @@ EVENT_LABELS: dict[tuple[int, int], str] = {
     (5, 16): "multi_factor_authenticated",
     (5, 21): "door_unlocked",
     (5, 22): "door_locked",
+    (5, 37): "doorbell_ringing",
     (5, 38): "fingerprint_authenticated",
     (5, 54): "face_fingerprint_authenticated",
     (5, 57): "face_pin_authenticated",
