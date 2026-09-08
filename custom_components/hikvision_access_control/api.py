@@ -16,12 +16,11 @@ from typing import Any
 import requests
 from requests.auth import HTTPDigestAuth
 
-from .const import AUTH_SUCCESS_EVENTS, EVENT_LABELS
+from .const import AUTH_SUCCESS_EVENTS, DOORBELL_EVENTS, EVENT_LABELS
 from .parser import HikvisionMultipartParser
 
 _LOGGER = logging.getLogger(__name__)
 
-DOORBELL_EVENT = (5, 37)
 DOORBELL_DEDUPLICATION_SECONDS = 5
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
@@ -384,14 +383,19 @@ class HikvisionAccessAPI:
 
     def _handle_event_payload(self, payload: dict[str, Any]) -> None:
         """Route one decoded ISAPI event payload."""
-        if payload.get("eventType") == "AccessControllerEvent":
+        raw_event_type = str(payload.get("eventType") or "unknown")
+        event_type = raw_event_type.casefold()
+        if event_type == "accesscontrollerevent":
             self._handle_event(payload)
+            return
+        if event_type == "changedcallstatus" and self._handle_changed_call_status(
+            payload
+        ):
             return
 
         self._pending_picture_parts = 0
         self._pending_picture_target = None
-        raw_event_type = str(payload.get("eventType") or "unknown")
-        if raw_event_type.casefold() == "heartbeat":
+        if event_type == "heartbeat":
             return
 
         common_fields = {
@@ -414,9 +418,7 @@ class HikvisionAccessAPI:
             "date_time": payload.get("dateTime"),
             "active_post_count": payload.get("activePostCount"),
             "event_data": {
-                key: value
-                for key, value in payload.items()
-                if key not in common_fields
+                key: value for key, value in payload.items() if key not in common_fields
             },
         }
         _LOGGER.debug(
@@ -425,6 +427,53 @@ class HikvisionAccessAPI:
             self.last_event,
         )
         self._notify()
+
+    def _handle_changed_call_status(self, payload: dict[str, Any]) -> bool:
+        """Convert a documented intercom ring status to a doorbell event."""
+        changed_status = payload.get("ChangedCallStatus") or payload.get(
+            "changedCallStatus"
+        )
+        if not isinstance(changed_status, dict):
+            return False
+        call_status = changed_status.get("CallStatus") or changed_status.get(
+            "callStatus"
+        )
+        if not isinstance(call_status, dict):
+            return False
+        status = str(call_status.get("status") or "").casefold()
+        if status != "ring":
+            return False
+
+        detail = {
+            "serialNo": f"call:{call_status.get('callerId') or 'unknown'}",
+            "doorNo": call_status.get("doorNo"),
+        }
+        if self._is_duplicate_doorbell(payload, detail):
+            _LOGGER.debug("Ignored duplicate intercom ring notification")
+            return True
+
+        normalized = {
+            "event": "doorbell_ringing",
+            "major": None,
+            "sub_event": None,
+            "serial_no": None,
+            "date_time": payload.get("dateTime"),
+            "door_no": call_status.get("doorNo"),
+            "raw_event_type": payload.get("eventType"),
+            "event_state": payload.get("eventState"),
+            "call_status": call_status.get("status"),
+            "call_command": call_status.get("cmd"),
+            "caller_id": call_status.get("callerId"),
+            "pictures_number": 0,
+            "active_post_count": payload.get("activePostCount"),
+            "picture_available": False,
+            "picture_source": None,
+        }
+        self._pending_picture_parts = 0
+        self._pending_picture_target = None
+        self.last_event = normalized
+        self._schedule_visitor_snapshot(normalized)
+        return True
 
     @staticmethod
     def _xml_event_payload(root: ET.Element) -> dict[str, Any] | None:
@@ -452,7 +501,7 @@ class HikvisionAccessAPI:
         sub_event = self._to_int(detail.get("subEventType"))
         major_event = self._to_int(detail.get("majorEventType"))
         event_code = (major_event, sub_event)
-        if event_code == DOORBELL_EVENT and self._is_duplicate_doorbell(
+        if event_code in DOORBELL_EVENTS and self._is_duplicate_doorbell(
             payload, detail
         ):
             _LOGGER.debug("Ignored duplicate doorbell notification")
@@ -475,7 +524,7 @@ class HikvisionAccessAPI:
         pictures_number = self._to_int(normalized["pictures_number"]) or 0
         self._pending_picture_parts = max(pictures_number, 0)
         self._pending_picture_target = (
-            "visitor" if event_code == DOORBELL_EVENT else "access"
+            "visitor" if event_code in DOORBELL_EVENTS else "access"
         )
         if self._pending_picture_parts == 0:
             self._pending_picture_target = None
@@ -490,7 +539,7 @@ class HikvisionAccessAPI:
             self.last_auth = normalized
             self.last_result = "authorized"
 
-        if event_code == DOORBELL_EVENT:
+        if event_code in DOORBELL_EVENTS:
             normalized["picture_available"] = False
             normalized["picture_source"] = None
             self._schedule_visitor_snapshot(normalized)
@@ -610,6 +659,10 @@ class HikvisionAccessAPI:
     @staticmethod
     def _to_int(value: Any) -> int | None:
         try:
+            if isinstance(value, str):
+                normalized = value.strip()
+                base = 16 if normalized.casefold().startswith("0x") else 10
+                return int(normalized, base)
             return int(value)
         except (TypeError, ValueError):
             return None

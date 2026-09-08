@@ -29,7 +29,7 @@ dispositivo no Home Assistant.
 | Plataforma | Entidade | Função |
 | --- | --- | --- |
 | Button | Abrir portão | Pulsa a porta 1 por ISAPI quando o dispositivo anuncia essa capacidade |
-| Event | Evento de acesso | Emite autenticações e alterações confirmadas do relé |
+| Event | Evento de acesso | Emite autenticações, estados da porta, alarmes de segurança e chamadas |
 | Sensor | Último usuário | Nome ou matrícula do último acesso autorizado |
 | Sensor | Matrícula do último usuário | Identificador recebido do terminal |
 | Sensor | Último método | Método de verificação informado pelo evento |
@@ -46,15 +46,28 @@ Mapeamentos confirmados pelas amostras descritas para o DS-K1T344:
 - `majorEventType: 5`, `subEventType: 75`: autenticação facial autorizada.
 - `majorEventType: 5`, `subEventType: 21`: relé/fechadura destravado.
 - `majorEventType: 5`, `subEventType: 22`: relé/fechadura travado.
-- `majorEventType: 5`, `subEventType: 37`: campainha/comunicador acionado.
+
+A integração também segue a tabela oficial de alarmes de controle de acesso da
+Hikvision. Entre os eventos classificados estão:
+
+- `majorEventType: 5`, `subEventType: 37` (`0x25`): campainha tocando;
+- `majorEventType: 5`, `subEventType: 51` (`0x33`): chamada à central;
+- `eventType: changedCallStatus` com `status: ring`: chamada de vídeo porteiro;
+- `5/25` a `5/28`: porta aberta, fechada, aberta de forma anormal ou por tempo
+  excessivo;
+- `1/0x404`, `1/0x406` e `1/0x40f`: violação do terminal, leitor ou módulo de
+  segurança;
+- falhas e tempos esgotados dos métodos de autenticação mais comuns.
 
 Também são classificados os eventos de autenticação bem-sucedida documentados
 pela Hikvision para cartão, cartão e PIN, digital, combinações de face e outros
 fatores, PIN e autenticação combinada. O campo `currentVerifyMode` recebido do
 terminal continua sendo exposto como o método do último acesso.
 
-Outros códigos são publicados como `unknown_access_event`; não são classificados
-sem documentação ou amostra real.
+Os valores numéricos são aceitos tanto em decimal quanto como texto hexadecimal.
+Outros códigos continuam publicados como `unknown_access_event`, mantendo
+`major` e `sub_event` nos atributos para diagnóstico. Outros tipos ISAPI ficam
+como `unknown_isapi_event`, com o conteúdo específico preservado em `event_data`.
 
 > **Importante:** os eventos 5/21 e 5/22 indicam somente o comando/estado lógico do
 > relé. Eles não comprovam que o portão abriu ou fechou fisicamente. Para essa
@@ -170,6 +183,11 @@ mode: queued
 - **Conexão ISAPI offline:** verifique se o Home Assistant alcança
   `https://192.168.1.100:443`. O fluxo se reconecta automaticamente com espera
   progressiva de 2 a 30 segundos.
+- **Evento aparece como “Desconhecido”:** uma entidade `event` recém-criada fica
+  nesse estado até receber o primeiro evento; depois confira o atributo
+  `event_type`. No sensor “Último evento”, `unknown_access_event` indica uma
+  combinação ainda não classificada — os atributos `major` e `sub_event` mostram
+  o código recebido. `unknown_isapi_event` traz o tipo em `raw_event_type`.
 - **Sem foto:** gere uma autenticação facial. Eventos de relé normalmente não
   carregam JPEG. Para a campainha, confirme também que o usuário ISAPI pode ler
   `/Streaming/channels/101/picture`.
@@ -193,6 +211,7 @@ necessário gerar ZIP personalizado: o HACS instala diretamente
 - [Imagens locais para integrações personalizadas](https://developers.home-assistant.io/docs/core/integration/brand_images/)
 - [Portal oficial de guias ISAPI da Hikvision](https://tpp.hikvision.com/download/ISAPI_OTAP?type=1)
 - [Eventos oficiais de controle de acesso Hikvision](https://open.hikvision.com/hardware/v2/%E7%BB%93%E6%9E%84%E4%BD%93/NET_DVR_ACS_ALARM_INFO.html)
+- [Capacidades oficiais de vídeo porteiro Hikvision](https://open.hikvision.com/hardware/v2/08%E5%8D%8F%E8%AE%AE%E9%80%8F%E4%BC%A0/%E5%8F%AF%E8%A7%86%E5%AF%B9%E8%AE%B2.html)
 - [Caminhos HTTP oficiais para snapshots Hikvision](https://www.hikvision.com/content/dam/hikvision/de/quick-start-guide/RTSP_und_HTTP_Pfade_fuer_Bilder_und_Videostreams_bei_IP-Kameras.pdf)
 
 ## Licença

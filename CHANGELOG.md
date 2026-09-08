@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-09-08
+
+### Added
+
+- Classification for documented access denial, authentication failure, physical
+  door, exit-button, input fault, duress, and tamper events.
+- Doorbell detection from both documented access-control codes `5/37` (doorbell)
+  and `5/51` (call center).
+- Doorbell detection from documented `changedCallStatus` events whose call status
+  changes to `ring`, for video-intercom firmwares.
+
+### Fixed
+
+- Accept hexadecimal `majorEventType` and `subEventType` strings in addition to
+  the documented decimal representation.
+- Include `unknown_isapi_event` in the last-event sensor options instead of letting
+  Home Assistant render that valid diagnostic state as unknown.
+- Redact caller, employee, and card identifiers from nested diagnostic event data.
+
 ## [0.1.3] - 2026-09-07
 
 ### Added
@@ -67,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - Only event mappings confirmed by the supplied DS-K1T344 observations are
   classified.
 
+[0.1.4]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.0...v0.1.1

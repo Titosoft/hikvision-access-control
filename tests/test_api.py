@@ -313,6 +313,36 @@ def test_only_confirmed_major_and_sub_event_pairs_are_classified() -> None:
     assert api.relay_unlocked is True
 
 
+@pytest.mark.parametrize(
+    ("major", "minor", "expected"),
+    [
+        ("0x5", "0x19", "door_opened"),
+        (5, 26, "door_closed"),
+        (5, 27, "door_forced_open"),
+        (5, 28, "door_open_too_long"),
+        (5, 76, "authentication_failed"),
+        (1, "0x404", "device_tamper_alarm"),
+        (1, "0x40f", "security_module_tamper_alarm"),
+    ],
+)
+def test_documented_access_and_security_events_are_classified(
+    major, minor, expected
+) -> None:
+    api = _api()
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {
+                "majorEventType": major,
+                "subEventType": minor,
+            },
+        }
+    )
+
+    assert api.last_event["event"] == expected
+
+
 def test_documented_card_and_pin_events_are_authorized() -> None:
     api = _api()
 
@@ -392,11 +422,65 @@ def test_non_access_xml_event_preserves_nested_diagnostic_fields() -> None:
     }
 
 
-def test_heartbeat_is_not_exposed_as_diagnostic_event() -> None:
+@pytest.mark.parametrize("content_type", ["application/json", "text/json"])
+def test_changed_call_status_ring_becomes_doorbell_event(
+    monkeypatch, content_type
+) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    body = (
+        b'{"dateTime":"2026-09-08T08:00:00-03:00","activePostCount":1,'
+        b'"eventType":"changedCallStatus","eventState":"active",'
+        b'"ChangedCallStatus":{"CallStatus":{"callerId":"1",'
+        b'"cmd":"request","status":"ring"}}}'
+    )
+
+    api._handle_part({"content-type": content_type}, body)
+
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["raw_event_type"] == "changedCallStatus"
+    assert api.last_event["call_status"] == "ring"
+    assert api.last_event["call_command"] == "request"
+    assert len(ControlledTimer.created) == 1
+
+
+def test_changed_call_status_xml_ring_becomes_doorbell_event(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    body = (
+        b'<EventNotificationAlert xmlns="http://www.isapi.org/ver20/XMLSchema">'
+        b"<dateTime>2026-09-08T08:00:00-03:00</dateTime>"
+        b"<eventType>changedCallStatus</eventType><eventState>active</eventState>"
+        b"<ChangedCallStatus><CallStatus><callerId>1</callerId>"
+        b"<cmd>request</cmd><status>ring</status></CallStatus>"
+        b"</ChangedCallStatus></EventNotificationAlert>"
+    )
+
+    api._handle_part({"content-type": "application/xml"}, body)
+
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["call_status"] == "ring"
+    assert len(ControlledTimer.created) == 1
+
+
+def test_changed_call_status_other_state_remains_diagnostic() -> None:
     api = _api()
     api._handle_event_payload(
-        {"eventType": "heartBeat", "eventState": "active"}
+        {
+            "eventType": "changedCallStatus",
+            "ChangedCallStatus": {"CallStatus": {"cmd": "hangUp", "status": "idle"}},
+        }
     )
+
+    assert api.last_event["event"] == "unknown_isapi_event"
+    assert api.last_event["raw_event_type"] == "changedCallStatus"
+
+
+def test_heartbeat_is_not_exposed_as_diagnostic_event() -> None:
+    api = _api()
+    api._handle_event_payload({"eventType": "heartBeat", "eventState": "active"})
 
     assert api.last_event is None
 
@@ -476,6 +560,27 @@ def test_doorbell_attachment_becomes_visitor_picture(monkeypatch) -> None:
     assert api.last_event["picture_source"] == "event_attachment"
     assert ControlledTimer.created[0].cancelled is True
     assert updates == [True]
+
+
+def test_call_center_access_event_is_treated_as_doorbell(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+
+    api._handle_event(
+        {
+            "eventType": "AccessControllerEvent",
+            "dateTime": "2026-09-08T08:01:00-03:00",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 51,
+                "serialNo": 200,
+            },
+        }
+    )
+
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert len(ControlledTimer.created) == 1
 
 
 def test_doorbell_without_attachment_uses_snapshot_fallback(monkeypatch) -> None:
