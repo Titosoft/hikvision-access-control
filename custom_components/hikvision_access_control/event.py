@@ -12,7 +12,9 @@ from . import HikvisionConfigEntry
 from .const import EVENT_LABELS
 from .entity import HikvisionAccessEntity
 
-EVENT_TYPES = sorted(set(EVENT_LABELS.values()) | {"unknown_access_event"})
+EVENT_TYPES = sorted(
+    set(EVENT_LABELS.values()) | {"unknown_access_event", "unknown_isapi_event"}
+)
 
 
 async def async_setup_entry(

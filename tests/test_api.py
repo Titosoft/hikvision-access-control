@@ -352,6 +352,55 @@ def test_xml_access_event_is_decoded() -> None:
     assert api.last_auth["name"] == "Example User"
 
 
+def test_non_access_json_event_is_exposed_for_diagnostics() -> None:
+    api = _api()
+    body = (
+        b'{"eventType":"VideoIntercomEvent","eventState":"active",'
+        b'"eventDescription":"Video intercom event",'
+        b'"VideoIntercomEvent":{"eventType":1,"callType":2}}'
+    )
+
+    api._handle_part({"content-type": "text/json"}, body)
+
+    assert api.last_event == {
+        "event": "unknown_isapi_event",
+        "raw_event_type": "VideoIntercomEvent",
+        "event_state": "active",
+        "event_description": "Video intercom event",
+        "date_time": None,
+        "active_post_count": None,
+        "event_data": {"VideoIntercomEvent": {"eventType": 1, "callType": 2}},
+    }
+
+
+def test_non_access_xml_event_preserves_nested_diagnostic_fields() -> None:
+    api = _api()
+    body = (
+        b'<EventNotificationAlert xmlns="http://www.isapi.org/ver20/XMLSchema">'
+        b"<dateTime>2026-09-07T14:00:00-03:00</dateTime>"
+        b"<eventType>VideoIntercomEvent</eventType><eventState>active</eventState>"
+        b"<VideoIntercomEvent><callType>visitor</callType>"
+        b"<keyNo>1</keyNo></VideoIntercomEvent></EventNotificationAlert>"
+    )
+
+    api._handle_part({"content-type": "application/xml"}, body)
+
+    assert api.last_event["event"] == "unknown_isapi_event"
+    assert api.last_event["raw_event_type"] == "VideoIntercomEvent"
+    assert api.last_event["event_data"] == {
+        "VideoIntercomEvent": {"callType": "visitor", "keyNo": "1"}
+    }
+
+
+def test_heartbeat_is_not_exposed_as_diagnostic_event() -> None:
+    api = _api()
+    api._handle_event_payload(
+        {"eventType": "heartBeat", "eventState": "active"}
+    )
+
+    assert api.last_event is None
+
+
 def test_thermal_image_does_not_replace_visible_access_picture() -> None:
     api = _api()
     api._handle_event(

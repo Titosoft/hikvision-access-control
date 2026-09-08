@@ -349,7 +349,11 @@ class HikvisionAccessAPI:
                 self._handle_event_payload(payload)
             return
 
-        if "application/json" in content_type or "accesscontrollerevent" in disposition:
+        if (
+            "application/json" in content_type
+            or "accesscontrollerevent" in disposition
+            or body.lstrip().startswith(b"{")
+        ):
             try:
                 payload = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -382,9 +386,45 @@ class HikvisionAccessAPI:
         """Route one decoded ISAPI event payload."""
         if payload.get("eventType") == "AccessControllerEvent":
             self._handle_event(payload)
-        else:
-            self._pending_picture_parts = 0
-            self._pending_picture_target = None
+            return
+
+        self._pending_picture_parts = 0
+        self._pending_picture_target = None
+        raw_event_type = str(payload.get("eventType") or "unknown")
+        if raw_event_type.casefold() == "heartbeat":
+            return
+
+        common_fields = {
+            "eventType",
+            "eventState",
+            "eventDescription",
+            "dateTime",
+            "activePostCount",
+            "ipAddress",
+            "ipv6Address",
+            "portNo",
+            "protocol",
+            "macAddress",
+        }
+        self.last_event = {
+            "event": "unknown_isapi_event",
+            "raw_event_type": raw_event_type,
+            "event_state": payload.get("eventState"),
+            "event_description": payload.get("eventDescription"),
+            "date_time": payload.get("dateTime"),
+            "active_post_count": payload.get("activePostCount"),
+            "event_data": {
+                key: value
+                for key, value in payload.items()
+                if key not in common_fields
+            },
+        }
+        _LOGGER.debug(
+            "Received unclassified ISAPI event type %s: %s",
+            raw_event_type,
+            self.last_event,
+        )
+        self._notify()
 
     @staticmethod
     def _xml_event_payload(root: ET.Element) -> dict[str, Any] | None:
@@ -392,16 +432,19 @@ class HikvisionAccessAPI:
         if HikvisionAccessAPI._local_name(root.tag) != "EventNotificationAlert":
             return None
 
+        def xml_value(element: ET.Element) -> Any:
+            children = list(element)
+            if not children:
+                return element.text
+            return {
+                HikvisionAccessAPI._local_name(child.tag): xml_value(child)
+                for child in children
+            }
+
         payload: dict[str, Any] = {}
         for child in root:
             name = HikvisionAccessAPI._local_name(child.tag)
-            if name == "AccessControllerEvent":
-                payload[name] = {
-                    HikvisionAccessAPI._local_name(item.tag): item.text
-                    for item in child
-                }
-            elif len(child) == 0:
-                payload[name] = child.text
+            payload[name] = xml_value(child)
         return payload
 
     def _handle_event(self, payload: dict[str, Any]) -> None:

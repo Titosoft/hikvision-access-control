@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-09-07
+
+### Added
+
+- Diagnostic `unknown_isapi_event` events for non-heartbeat ISAPI payloads not yet
+  classified by the integration, including their event type and event-specific data.
+
+### Fixed
+
+- Parse JSON alert parts even when a Hikvision firmware labels them as `text/json`.
+- Preserve nested fields from non-access-control XML alerts so device-specific
+  intercom button payloads can be identified without guessing.
+
 ## [0.1.2] - 2026-09-07
 
 ### Added
@@ -54,6 +67,7 @@ All notable changes to this project will be documented in this file.
 - Only event mappings confirmed by the supplied DS-K1T344 observations are
   classified.
 
+[0.1.3]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Titosoft/hikvision-access-control/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Titosoft/hikvision-access-control/releases/tag/v0.1.0

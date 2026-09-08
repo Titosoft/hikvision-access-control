@@ -81,7 +81,8 @@
               "fingerprint_authenticated": "Fingerprint authentication authorized",
               "multi_factor_authenticated": "Multi-factor authentication authorized",
               "pin_authenticated": "PIN authentication authorized",
-              "unknown_access_event": "Unknown access event"
+              "unknown_access_event": "Unknown access event",
+              "unknown_isapi_event": "Unknown ISAPI event"
             }
           }
         }
@@ -110,7 +111,8 @@
           "fingerprint_authenticated": "Fingerprint authentication authorized",
           "multi_factor_authenticated": "Multi-factor authentication authorized",
           "pin_authenticated": "PIN authentication authorized",
-          "unknown_access_event": "Unknown access event"
+          "unknown_access_event": "Unknown access event",
+          "unknown_isapi_event": "Unknown ISAPI event"
         }
       },
       "last_result": {

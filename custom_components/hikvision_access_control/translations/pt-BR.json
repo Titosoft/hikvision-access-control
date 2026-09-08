@@ -81,7 +81,8 @@
               "fingerprint_authenticated": "Autenticação por digital autorizada",
               "multi_factor_authenticated": "Autenticação multifator autorizada",
               "pin_authenticated": "Autenticação por PIN autorizada",
-              "unknown_access_event": "Evento de acesso desconhecido"
+              "unknown_access_event": "Evento de acesso desconhecido",
+              "unknown_isapi_event": "Evento ISAPI desconhecido"
             }
           }
         }
@@ -110,7 +111,8 @@
           "fingerprint_authenticated": "Autenticação por digital autorizada",
           "multi_factor_authenticated": "Autenticação multifator autorizada",
           "pin_authenticated": "Autenticação por PIN autorizada",
-          "unknown_access_event": "Evento de acesso desconhecido"
+          "unknown_access_event": "Evento de acesso desconhecido",
+          "unknown_isapi_event": "Evento ISAPI desconhecido"
         }
       },
       "last_result": {
