@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Executable `bump_version.sh` release workflow with patch/minor/major or explicit
+  versions, a dry-run preview, validation, version commit, atomic branch/tag push,
+  and GitHub Release publication using the unreleased changelog notes.
+
 ### Changed
 
 - Show unknown events with their raw ISAPI type or access-control major/minor

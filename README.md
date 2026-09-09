@@ -221,10 +221,49 @@ mode: queued
 
 ## Publicando uma nova versão
 
-Para publicar uma nova versão, atualize `version` no `manifest.json` e o `CHANGELOG.md`,
-execute os testes, faça commit e envie a branch `main`. Depois crie a tag anotada
-com o mesmo número da versão, envie a tag e publique uma GitHub Release. Não é
-necessário gerar ZIP personalizado: o HACS instala diretamente
+Use o script `bump_version.sh` na branch `main`, depois de fazer commit das
+alterações e descrever as mudanças na seção `## [Unreleased]` do `CHANGELOG.md`.
+Não é preciso atualizar o manifesto nem fazer o push antes de executar o script.
+
+Pré-requisitos: Git, GitHub CLI autenticado (`gh auth login`) com permissão para
+publicar no repositório e Python 3.12 ou superior com as dependências de teste.
+Por exemplo, com Python 3.12 instalado:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+gh auth login
+```
+
+Visualize o resultado antes de publicar, inclusive com alterações não commitadas:
+
+```bash
+./bump_version.sh --dry-run
+```
+
+Para publicar, escolha um dos comandos:
+
+```bash
+./bump_version.sh          # patch: 0.1.4 -> 0.1.5
+./bump_version.sh minor    # minor: 0.1.4 -> 0.2.0
+./bump_version.sh major    # major: 0.1.4 -> 1.0.0
+./bump_version.sh 0.2.3    # versão explícita, maior que a atual
+```
+
+O script usa `.venv/bin/python` quando disponível; para outro ambiente, execute
+`PYTHON=/caminho/do/python ./bump_version.sh`. Ele exige a árvore de trabalho
+limpa, verifica a sincronização com `origin/main` e a disponibilidade da tag,
+valida JSON, compila o Python, executa Ruff e os testes. Depois atualiza o
+manifesto e o changelog, cria um commit de versão e uma tag anotada, envia `main`
+e a tag juntos e publica a GitHub Release com as notas de `Unreleased`.
+Uma seção `Unreleased` vazia fica pronta para as próximas mudanças.
+
+Se o push ou a publicação falhar depois da criação do commit, o script mostra
+como continuar usando a mesma tag. Não execute outro bump para repetir a
+publicação. `--dry-run` apenas mostra a versão e as notas; não executa os testes
+nem verifica autenticação ou acesso remoto.
+
+Não é necessário gerar ZIP: o HACS instala diretamente
 `custom_components/hikvision_access_control` do código-fonte da release.
 
 ## Referências
