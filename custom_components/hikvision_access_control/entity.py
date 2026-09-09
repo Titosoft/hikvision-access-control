@@ -4,9 +4,23 @@ from __future__ import annotations
 
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.translation import async_get_translations
 
 from .api import HikvisionAccessAPI
 from .const import DOMAIN
+from .event_display import UNKNOWN_EVENT_LABELS
+
+
+async def async_get_unknown_event_labels(hass) -> dict[str, str]:
+    """Use the server language for dynamic labels stored in event history."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "entity", {DOMAIN}
+    )
+    prefix = f"component.{DOMAIN}.entity.sensor.last_event.state."
+    return {
+        code: translations.get(f"{prefix}{code}", fallback)
+        for code, fallback in UNKNOWN_EVENT_LABELS.items()
+    }
 
 
 class HikvisionAccessEntity(Entity):

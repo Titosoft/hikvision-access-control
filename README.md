@@ -65,9 +65,27 @@ fatores, PIN e autenticação combinada. O campo `currentVerifyMode` recebido do
 terminal continua sendo exposto como o método do último acesso.
 
 Os valores numéricos são aceitos tanto em decimal quanto como texto hexadecimal.
-Outros códigos continuam publicados como `unknown_access_event`, mantendo
-`major` e `sub_event` nos atributos para diagnóstico. Outros tipos ISAPI ficam
-como `unknown_isapi_event`, com o conteúdo específico preservado em `event_data`.
+Outros códigos mantêm a classificação `unknown_access_event`, com `major` e
+`sub_event` nos atributos para diagnóstico. Outros tipos ISAPI mantêm a
+classificação `unknown_isapi_event`, com o conteúdo específico em `event_data`.
+Nas entidades “Evento de acesso” e “Último evento”, a exibição inclui a origem:
+`Evento ISAPI desconhecido (changedCallStatus)` ou
+`Evento de acesso desconhecido (5/999)`. O nome ISAPI é o identificador recebido,
+sem inferir o significado de um evento ainda não mapeado.
+
+O atributo `event_code` contém a classificação estável em ambas as entidades.
+Automações que comparavam `event_type` ou o estado do sensor diretamente com
+`unknown_isapi_event` ou `unknown_access_event` devem usar `event_code`, pois o
+texto desses eventos agora inclui os parênteses. Por exemplo:
+
+```jinja2
+{{ trigger.to_state.attributes.event_code == 'unknown_isapi_event' }}
+```
+
+Os tipos conhecidos, como `doorbell_ringing` e `face_authenticated`, continuam
+iguais. O texto dos eventos desconhecidos usa o idioma geral do Home Assistant
+no carregamento da integração; para mudar esse idioma, recarregue a integração.
+Os registros anteriores do histórico não são renomeados.
 
 > **Importante:** os eventos 5/21 e 5/22 indicam somente o comando/estado lógico do
 > relé. Eles não comprovam que o portão abriu ou fechou fisicamente. Para essa
@@ -185,9 +203,10 @@ mode: queued
   progressiva de 2 a 30 segundos.
 - **Evento aparece como “Desconhecido”:** uma entidade `event` recém-criada fica
   nesse estado até receber o primeiro evento; depois confira o atributo
-  `event_type`. No sensor “Último evento”, `unknown_access_event` indica uma
-  combinação ainda não classificada — os atributos `major` e `sub_event` mostram
-  o código recebido. `unknown_isapi_event` traz o tipo em `raw_event_type`.
+  `event_type`. Em ambas as entidades, `event_code: unknown_access_event` indica
+  uma combinação ainda não classificada — os atributos `major` e `sub_event`
+  mostram o código recebido. `event_code: unknown_isapi_event` traz o tipo em
+  `raw_event_type`. A origem também aparece entre parênteses no texto do evento.
   Heartbeats (`heartBeat` ou `videoloss` com `eventState: inactive`) são ignorados
   e não substituem o último evento. A correção não remove registros antigos do
   histórico; outros tipos ainda não classificados continuam disponíveis para

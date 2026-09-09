@@ -13,7 +13,8 @@ from homeassistant.util import dt as dt_util
 
 from . import HikvisionConfigEntry
 from .const import EVENT_LABELS
-from .entity import HikvisionAccessEntity
+from .entity import HikvisionAccessEntity, async_get_unknown_event_labels
+from .event_display import event_display_type
 
 EVENT_OPTIONS = sorted(
     set(EVENT_LABELS.values()) | {"unknown_access_event", "unknown_isapi_event"}
@@ -27,6 +28,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Hikvision sensors."""
     api = entry.runtime_data.api
+    labels = await async_get_unknown_event_labels(hass)
     async_add_entities(
         [
             HikvisionConnectionSensor(api),
@@ -35,7 +37,7 @@ async def async_setup_entry(
             HikvisionLastAuthSensor(api, "verify_mode", "mdi:face-recognition"),
             HikvisionResultSensor(api),
             HikvisionLastAccessTimeSensor(api),
-            HikvisionLastEventSensor(api),
+            HikvisionLastEventSensor(api, labels),
         ]
     )
 
@@ -125,16 +127,27 @@ class HikvisionLastEventSensor(HikvisionAccessEntity, SensorEntity):
 
     _attr_translation_key = "last_event"
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = EVENT_OPTIONS
     _attr_icon = "mdi:door"
 
-    def __init__(self, api) -> None:
+    def __init__(self, api, unknown_event_labels: dict[str, str]) -> None:
         super().__init__(api, "last_event")
+        self._unknown_event_labels = unknown_event_labels
+
+    @property
+    def options(self) -> list[str]:
+        """Include the current diagnostic label among valid enum values."""
+        value = self.native_value
+        if value is not None and value not in EVENT_OPTIONS:
+            return [*EVENT_OPTIONS, value]
+        return list(EVENT_OPTIONS)
 
     @property
     def native_value(self) -> str | None:
-        return self.api.last_event.get("event") if self.api.last_event else None
+        return event_display_type(self.api.last_event, self._unknown_event_labels)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return dict(self.api.last_event or {})
+        attributes = dict(self.api.last_event or {})
+        if attributes:
+            attributes["event_code"] = attributes.get("event", "unknown_access_event")
+        return attributes

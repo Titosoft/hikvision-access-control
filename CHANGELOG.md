@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Show unknown events with their raw ISAPI type or access-control major/minor
+  codes in parentheses in both the event entity and last-event sensor. Labels
+  use the Home Assistant server language when the integration is loaded.
+- Expose the stable classification as `event_code` on both entities. Automations
+  matching the previous unknown `event_type` or sensor state must use this
+  attribute; known event types are unchanged.
+
 ### Fixed
 
 - Ignore ISAPI `videoloss` notifications with an `inactive` state, which are
