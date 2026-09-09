@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-09
+
 ### Added
 
 - Structured Home Assistant logs for setup, event-stream lifecycle, every decoded
