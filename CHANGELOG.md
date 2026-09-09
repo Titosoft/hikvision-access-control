@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Install missing release-test dependencies automatically, including in virtual
+  environments created without `pip` when `uv` is available.
 - Ignore ISAPI `videoloss` notifications with an `inactive` state, which are
   stream heartbeats, so they do not overwrite the latest access event or flood
   its history with unknown events. Active video-loss alerts remain available.

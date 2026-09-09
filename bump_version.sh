@@ -10,9 +10,10 @@ Sem argumento, incrementa o patch. Exemplo: 0.1.4 -> 0.1.5.
 --dry-run mostra a versão e as notas, sem alterar arquivos ou publicar.
 
 Antes de publicar, faça commit das mudanças e preencha [Unreleased] no
-CHANGELOG.md. Requer git, GitHub CLI autenticado (gh auth login) e Python 3.12+
-com as dependências de requirements-test.txt. Use PYTHON=/caminho/python
-para escolher o interpretador; por padrão usa .venv/bin/python ou python3.
+CHANGELOG.md. Requer git, GitHub CLI autenticado (gh auth login) e Python 3.12+.
+As dependências de teste são instaladas automaticamente quando necessário.
+Use PYTHON=/caminho/python para escolher o interpretador; por padrão usa
+.venv/bin/python ou python3.
 EOF
 }
 
@@ -44,6 +45,8 @@ else
   python_bin=python3
 fi
 command -v "$python_bin" >/dev/null || fail "Python não encontrado: $python_bin"
+"$python_bin" -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' || \
+  fail "Use Python 3.12 ou superior: $python_bin"
 release_tmp=$(mktemp -d "${TMPDIR:-/tmp}/hikvision-release.XXXXXX")
 trap 'rm -rf -- "$release_tmp"' EXIT
 release_phase=preparação
@@ -113,7 +116,23 @@ command -v gh >/dev/null || fail "Instale o GitHub CLI e execute gh auth login."
 origin_url=$(git remote get-url origin)
 gh auth status
 release_repo=$(gh repo view "$origin_url" --json nameWithOwner --jq .nameWithOwner)
-"$python_bin" -c 'import pytest, requests, ruff' || fail "Instale as dependências com: $python_bin -m pip install -r requirements-test.txt"
+if ! "$python_bin" -c 'import pytest, requests, ruff' 2>/dev/null; then
+  release_phase=instalação-das-dependências
+  printf 'Instalando dependências de teste em %s...\n' "$python_bin"
+  if command -v uv >/dev/null; then
+    uv pip install --python "$python_bin" -r requirements-test.txt
+  elif "$python_bin" -m pip --version >/dev/null 2>&1; then
+    "$python_bin" -m pip install -r requirements-test.txt
+  elif "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
+    "$python_bin" -m pip install -r requirements-test.txt
+  elif command -v pip3 >/dev/null && pip3 help 2>/dev/null | grep -q -- '--python'; then
+    pip3 --python "$python_bin" install -r requirements-test.txt
+  else
+    fail "Não foi possível instalar no ambiente. Instale uv ou recrie-o com: python3.12 -m venv .venv"
+  fi
+  "$python_bin" -c 'import pytest, requests, ruff' || \
+    fail "Não foi possível instalar as dependências de teste."
+fi
 git fetch origin main --tags
 git merge-base --is-ancestor refs/remotes/origin/main HEAD || fail "A main local está atrasada ou divergiu de origin/main. Sincronize-a antes de publicar."
 if git show-ref --verify --quiet "refs/tags/$tag"; then

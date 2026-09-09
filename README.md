@@ -226,12 +226,13 @@ alterações e descrever as mudanças na seção `## [Unreleased]` do `CHANGELOG
 Não é preciso atualizar o manifesto nem fazer o push antes de executar o script.
 
 Pré-requisitos: Git, GitHub CLI autenticado (`gh auth login`) com permissão para
-publicar no repositório e Python 3.12 ou superior com as dependências de teste.
-Por exemplo, com Python 3.12 instalado:
+publicar no repositório e Python 3.12 ou superior. O script instala as dependências
+de `requirements-test.txt` automaticamente quando estiverem ausentes, usando
+`uv` quando disponível, o `pip` do ambiente, `ensurepip` ou um `pip3` que permita
+selecionar o Python de destino. Por exemplo:
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements-test.txt
 gh auth login
 ```
 

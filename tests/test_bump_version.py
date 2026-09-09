@@ -76,7 +76,18 @@ def release_repo(tmp_path):
         "    sys.exit('Unexpected gh invocation: ' + repr(args))\n"
     )
     gh.chmod(0o755)
+    uv = binaries / "uv"
+    uv.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['UV_TEST_RESULT']).write_text(json.dumps(sys.argv[1:]))\n"
+        "Path(os.environ['UV_TEST_MARKER']).touch()\n"
+    )
+    uv.chmod(0o755)
     env["PATH"] = f"{binaries}{os.pathsep}{env['PATH']}"
+    env["UV_TEST_RESULT"] = str(tmp_path / "uv.json")
+    env["UV_TEST_MARKER"] = str(tmp_path / "dependencies-installed")
     return repo, remote, env
 
 
@@ -119,6 +130,36 @@ def test_release_updates_versions_pushes_tag_and_publishes_notes(release_repo):
     assert release["args"][2] == "v0.1.5"
     assert "--verify-tag" in release["args"]
     assert release["notes"] == "### Fixed\n\n- Preserve event details.\n"
+
+
+def test_release_installs_missing_dependencies_with_uv(release_repo):
+    repo, _, env = release_repo
+    python_wrapper = Path(env["UV_TEST_RESULT"]).parent / "bin" / "missing-deps-python"
+    python_wrapper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "dependency_check = sys.argv[1:] == "
+        "['-c', 'import pytest, requests, ruff']\n"
+        "if dependency_check and not Path(os.environ['UV_TEST_MARKER']).exists():\n"
+        "    sys.exit(1)\n"
+        f"os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n"
+    )
+    python_wrapper.chmod(0o755)
+    env["PYTHON"] = str(python_wrapper)
+
+    result = command(repo, "bash", "bump_version.sh", env=env)
+
+    assert "Instalando dependências de teste" in result.stdout
+    uv_args = json.loads(Path(env["UV_TEST_RESULT"]).read_text())
+    assert uv_args == [
+        "pip",
+        "install",
+        "--python",
+        str(python_wrapper),
+        "-r",
+        "requirements-test.txt",
+    ]
 
 
 @pytest.mark.parametrize("problem", ["dirty", "tag", "tests", "empty_notes", "version"])
