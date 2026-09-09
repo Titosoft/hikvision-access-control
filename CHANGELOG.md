@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-09
+
 ### Added
 
 - Executable `bump_version.sh` release workflow with patch/minor/major or explicit
