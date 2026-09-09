@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -402,6 +403,71 @@ def test_non_access_json_event_is_exposed_for_diagnostics() -> None:
         "active_post_count": None,
         "event_data": {"VideoIntercomEvent": {"eventType": 1, "callType": 2}},
     }
+
+
+def test_debug_log_records_every_payload_and_redacts_sensitive_data(caplog) -> None:
+    api = _api()
+    payload = {
+        "eventType": "AccessControllerEvent",
+        "ipAddress": "10.0.0.25",
+        "AccessControllerEvent": {
+            "majorEventType": 5,
+            "subEventType": 75,
+            "name": "Private Person",
+            "employeeNoString": "secret-employee",
+            "cardNo": "secret-card",
+        },
+    }
+    caplog.set_level(logging.DEBUG, logger=API_MODULE.__name__)
+
+    api._handle_event_payload(payload)
+
+    messages = "\n".join(caplog.messages)
+    assert "Received Hikvision ISAPI event payload" in messages
+    assert "AccessControllerEvent" in messages
+    assert "**REDACTED**" in messages
+    assert "Private Person" not in messages
+    assert "secret-employee" not in messages
+    assert "secret-card" not in messages
+    assert "10.0.0.25" not in messages
+
+
+def test_unknown_events_are_logged_as_warnings(caplog) -> None:
+    api = _api()
+    caplog.set_level(logging.WARNING, logger=API_MODULE.__name__)
+
+    api._handle_event_payload(
+        {
+            "eventType": "AccessControllerEvent",
+            "eventState": "active",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 999,
+            },
+        }
+    )
+    api._handle_event_payload(
+        {"eventType": "UnexpectedIntercomEvent", "eventState": "active"}
+    )
+
+    messages = "\n".join(caplog.messages)
+    assert "unclassified Hikvision access event" in messages
+    assert "major=5, minor=999" in messages
+    assert "unclassified Hikvision ISAPI event" in messages
+    assert "type=UnexpectedIntercomEvent" in messages
+
+
+def test_unsupported_multipart_part_is_visible_in_debug_log(caplog) -> None:
+    api = _api()
+    caplog.set_level(logging.DEBUG, logger=API_MODULE.__name__)
+
+    api._handle_part({"content-type": "application/octet-stream"}, b"unknown")
+
+    assert any(
+        "Ignored unsupported Hikvision multipart part" in message
+        and "size=7" in message
+        for message in caplog.messages
+    )
 
 
 def test_non_access_xml_event_preserves_nested_diagnostic_fields() -> None:

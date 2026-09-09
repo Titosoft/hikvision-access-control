@@ -24,6 +24,21 @@ _LOGGER = logging.getLogger(__name__)
 DOORBELL_DEDUPLICATION_SECONDS = 5
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
+LOG_REDACTED = "**REDACTED**"
+LOG_SENSITIVE_FIELDS = {
+    "cardno",
+    "callerid",
+    "employeeno",
+    "employeenostring",
+    "facedata",
+    "fingerprintdata",
+    "ipaddress",
+    "ipv6address",
+    "macaddress",
+    "name",
+    "pictureurl",
+    "picuri",
+}
 
 
 class HikvisionApiError(Exception):
@@ -149,6 +164,12 @@ class HikvisionAccessAPI:
         self.unique_id = self.serial_number or self.mac_address or self.host
         self._discover_door_control_capabilities()
         self.available = True
+        _LOGGER.info(
+            "Connected to Hikvision terminal %s (model=%s, firmware=%s)",
+            self.host,
+            self.model,
+            self.firmware_version or "unknown",
+        )
         return values
 
     def _discover_door_control_capabilities(self) -> None:
@@ -172,10 +193,18 @@ class HikvisionAccessAPI:
             _LOGGER.debug("Could not read remote door control capabilities: %s", err)
         else:
             self.door_control_supported = True
+        _LOGGER.debug(
+            "Hikvision terminal %s remote door control support: %s",
+            self.host,
+            self.door_control_supported,
+        )
 
     def start(self, loop: AbstractEventLoop) -> None:
         """Start the background event stream."""
         if self._thread and self._thread.is_alive():
+            _LOGGER.debug(
+                "Hikvision event stream for %s is already running", self.host
+            )
             return
         self._loop = loop
         self._stop.clear()
@@ -184,10 +213,12 @@ class HikvisionAccessAPI:
             name=f"hikvision-access-{self.host}",
             daemon=True,
         )
+        _LOGGER.debug("Starting Hikvision event stream for %s", self.host)
         self._thread.start()
 
     def stop(self) -> None:
         """Stop the event stream."""
+        _LOGGER.debug("Stopping Hikvision event stream for %s", self.host)
         self._stop.set()
         self._cancel_visitor_snapshot()
         with self._stream_lock:
@@ -203,6 +234,7 @@ class HikvisionAccessAPI:
         if thread is None or not thread.is_alive():
             self._thread = None
         self._set_available(False)
+        _LOGGER.debug("Hikvision event stream for %s stopped", self.host)
 
     def open_door(self, door_no: int = 1) -> None:
         """Pulse the configured door relay."""
@@ -217,6 +249,11 @@ class HikvisionAccessAPI:
             data=body.encode(),
             headers={"Content-Type": "application/xml"},
             timeout=15,
+        )
+        _LOGGER.debug(
+            "Hikvision terminal %s accepted the open command for door %s",
+            self.host,
+            door_no,
         )
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
@@ -288,7 +325,13 @@ class HikvisionAccessAPI:
             except (HikvisionApiError, requests.RequestException, OSError) as err:
                 was_connected = self.available
                 if not self._stop.is_set():
-                    _LOGGER.warning("Hikvision event stream disconnected: %s", err)
+                    _LOGGER.warning(
+                        "Hikvision event stream for %s disconnected: %s; "
+                        "reconnecting in %s seconds",
+                        self.host,
+                        err,
+                        delay,
+                    )
                     self._set_available(False)
                 if was_connected:
                     delay = 2
@@ -302,6 +345,7 @@ class HikvisionAccessAPI:
         with self._stream_lock:
             self._session = session
         try:
+            _LOGGER.debug("Connecting to Hikvision event stream for %s", self.host)
             response = session.get(
                 self.base_url + "/ISAPI/Event/notification/alertStream",
                 auth=HTTPDigestAuth(self.username, self.password),
@@ -319,6 +363,7 @@ class HikvisionAccessAPI:
                 response.headers.get("Content-Type")
             )
             self._set_available(True)
+            _LOGGER.info("Hikvision event stream for %s connected", self.host)
             for chunk in response.iter_content(chunk_size=8192):
                 if self._stop.is_set():
                     break
@@ -341,11 +386,25 @@ class HikvisionAccessAPI:
             try:
                 root = ET.fromstring(body)
             except ET.ParseError:
-                _LOGGER.debug("Ignored malformed XML event part")
+                _LOGGER.debug(
+                    "Ignored malformed Hikvision XML event part from %s "
+                    "(content_type=%s, size=%s)",
+                    self.host,
+                    content_type or "unknown",
+                    len(body),
+                )
                 return
             payload = self._xml_event_payload(root)
             if payload is not None:
                 self._handle_event_payload(payload)
+            else:
+                _LOGGER.debug(
+                    "Ignored Hikvision XML multipart part from %s with root %s "
+                    "(size=%s)",
+                    self.host,
+                    self._local_name(root.tag),
+                    len(body),
+                )
             return
 
         if (
@@ -356,13 +415,24 @@ class HikvisionAccessAPI:
             try:
                 payload = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
-                _LOGGER.debug("Ignored malformed JSON event part")
+                _LOGGER.debug(
+                    "Ignored malformed Hikvision JSON event part from %s "
+                    "(content_type=%s, size=%s)",
+                    self.host,
+                    content_type or "unknown",
+                    len(body),
+                )
                 return
             self._handle_event_payload(payload)
             return
 
         if "image/jpeg" in content_type:
             if self._pending_picture_parts <= 0:
+                _LOGGER.debug(
+                    "Ignored unrelated Hikvision JPEG part from %s (size=%s)",
+                    self.host,
+                    len(body),
+                )
                 return
             self._pending_picture_parts -= 1
             picture_target = self._pending_picture_target
@@ -370,9 +440,20 @@ class HikvisionAccessAPI:
                 self._pending_picture_target = None
             content_id = headers.get("content-id", "").lower()
             if "thermal" in disposition or "thermal" in content_id:
+                _LOGGER.debug(
+                    "Ignored Hikvision thermal JPEG part from %s (size=%s)",
+                    self.host,
+                    len(body),
+                )
                 return
             name_match = re.search(r'name\s*=\s*"?([^";]+)', disposition)
             if name_match and name_match.group(1).strip() != "picture":
+                _LOGGER.debug(
+                    "Ignored Hikvision JPEG part named %s from %s (size=%s)",
+                    name_match.group(1).strip(),
+                    self.host,
+                    len(body),
+                )
                 return
             if picture_target == "visitor":
                 self._finish_visitor_event(body, "event_attachment")
@@ -380,11 +461,34 @@ class HikvisionAccessAPI:
                 self.latest_picture = body
                 self.latest_picture_time = datetime.now().astimezone()
                 self._notify()
+            _LOGGER.debug(
+                "Processed Hikvision JPEG event attachment from %s "
+                "(target=%s, size=%s)",
+                self.host,
+                picture_target,
+                len(body),
+            )
+            return
+
+        _LOGGER.debug(
+            "Ignored unsupported Hikvision multipart part from %s "
+            "(content_type=%s, disposition=%s, size=%s)",
+            self.host,
+            content_type or "unknown",
+            disposition or "unknown",
+            len(body),
+        )
 
     def _handle_event_payload(self, payload: dict[str, Any]) -> None:
         """Route one decoded ISAPI event payload."""
         raw_event_type = str(payload.get("eventType") or "unknown")
         event_type = raw_event_type.casefold()
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "Received Hikvision ISAPI event payload from %s: %s",
+                self.host,
+                self._redact_log_data(payload),
+            )
         # ISAPI also uses inactive videoloss alerts as stream heartbeats.
         # Ignore them before changing event or pending picture state.
         if event_type == "heartbeat" or (
@@ -425,10 +529,12 @@ class HikvisionAccessAPI:
                 key: value for key, value in payload.items() if key not in common_fields
             },
         }
-        _LOGGER.debug(
-            "Received unclassified ISAPI event type %s: %s",
+        _LOGGER.warning(
+            "Received unclassified Hikvision ISAPI event from %s "
+            "(type=%s, state=%s)",
+            self.host,
             raw_event_type,
-            self.last_event,
+            payload.get("eventState"),
         )
         self._notify()
 
@@ -476,6 +582,14 @@ class HikvisionAccessAPI:
         self._pending_picture_parts = 0
         self._pending_picture_target = None
         self.last_event = normalized
+        _LOGGER.debug(
+            "Classified Hikvision intercom event from %s as doorbell_ringing "
+            "(status=%s, command=%s, door=%s)",
+            self.host,
+            call_status.get("status"),
+            call_status.get("cmd"),
+            call_status.get("doorNo"),
+        )
         self._schedule_visitor_snapshot(normalized)
         return True
 
@@ -510,8 +624,9 @@ class HikvisionAccessAPI:
         ):
             _LOGGER.debug("Ignored duplicate doorbell notification")
             return
+        event_name = EVENT_LABELS.get(event_code, "unknown_access_event")
         normalized = {
-            "event": EVENT_LABELS.get(event_code, "unknown_access_event"),
+            "event": event_name,
             "major": major_event,
             "sub_event": sub_event,
             "serial_no": detail.get("serialNo"),
@@ -525,6 +640,26 @@ class HikvisionAccessAPI:
             "pictures_number": detail.get("picturesNumber", 0),
             "active_post_count": payload.get("activePostCount"),
         }
+        if event_name == "unknown_access_event":
+            _LOGGER.warning(
+                "Received unclassified Hikvision access event from %s "
+                "(major=%s, minor=%s, state=%s)",
+                self.host,
+                major_event,
+                sub_event,
+                payload.get("eventState"),
+            )
+        else:
+            _LOGGER.debug(
+                "Classified Hikvision access event from %s as %s "
+                "(major=%s, minor=%s, door=%s, pictures=%s)",
+                self.host,
+                event_name,
+                major_event,
+                sub_event,
+                detail.get("doorNo"),
+                detail.get("picturesNumber", 0),
+            )
         pictures_number = self._to_int(normalized["pictures_number"]) or 0
         self._pending_picture_parts = max(pictures_number, 0)
         self._pending_picture_target = (
@@ -659,6 +794,24 @@ class HikvisionAccessAPI:
             return
         self.available = available
         self._notify()
+
+    @classmethod
+    def _redact_log_data(cls, value: Any) -> Any:
+        """Copy ISAPI data for debug logging while redacting sensitive fields."""
+        if isinstance(value, dict):
+            return {
+                key: (
+                    LOG_REDACTED
+                    if str(key).casefold() in LOG_SENSITIVE_FIELDS
+                    else cls._redact_log_data(item)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._redact_log_data(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._redact_log_data(item) for item in value)
+        return value
 
     @staticmethod
     def _to_int(value: Any) -> int | None:

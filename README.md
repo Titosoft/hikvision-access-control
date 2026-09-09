@@ -192,6 +192,36 @@ mode: queued
 
 ## Solução de problemas
 
+### Logs e depuração de eventos
+
+Os tipos de evento que a integração ainda não reconhece são registrados como
+`warning` e aparecem no log padrão do Home Assistant. Eventos reconhecidos,
+heartbeats, partes multipart descartadas e o payload ISAPI decodificado ficam em
+`debug` para não poluir o log durante o uso normal. Dentro dos payloads, campos
+pessoais e de rede, como nome, matrícula, cartão, identificador da chamada, IP e
+MAC, são substituídos por `**REDACTED**`; imagens JPEG nunca são gravadas no log.
+
+Para habilitar temporariamente pelo Home Assistant, abra **Ferramentas do
+desenvolvedor → Ações**, execute `logger.set_level` e use:
+
+```yaml
+custom_components.hikvision_access_control: debug
+```
+
+Para habilitar após cada reinicialização, adicione ao `configuration.yaml`:
+
+```yaml
+logger:
+  logs:
+    custom_components.hikvision_access_control: debug
+```
+
+Depois reproduza o evento e abra **Configurações → Sistema → Logs**, filtrando por
+`hikvision_access_control`. Ao terminar, volte o nível para `warning`, pois o modo
+`debug` registra todos os payloads de evento e os heartbeats. Avisos
+`InsecureRequestWarning` indicam que a verificação do certificado HTTPS foi
+desabilitada; eles não representam falha do fluxo de eventos.
+
 - **A integração não aparece:** confirme o caminho exato da pasta e reinicie o
   Home Assistant após instalar ou atualizar manualmente.
 - **Credenciais inválidas:** confirme que o usuário é local, que a senha está

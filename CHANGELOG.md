@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Structured Home Assistant logs for setup, event-stream lifecycle, every decoded
+  ISAPI payload, event classification, ignored multipart parts, and door actions.
+  Debug payloads redact personal and network identifiers and never include JPEGs;
+  unclassified access and ISAPI events are warnings in the default log.
+
 ## [0.1.6] - 2026-09-09
 
 ### Added
