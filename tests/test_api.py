@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -483,6 +484,69 @@ def test_heartbeat_is_not_exposed_as_diagnostic_event() -> None:
     api._handle_event_payload({"eventType": "heartBeat", "eventState": "active"})
 
     assert api.last_event is None
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "application/xml"])
+@pytest.mark.parametrize(
+    ("event_type", "event_state"),
+    [("videoloss", "inactive"), ("VideoLoss", "Inactive"), ("heartBeat", "active")],
+)
+def test_stream_heartbeat_preserves_access_event_and_pending_picture(
+    content_type, event_type, event_state
+) -> None:
+    api = _api()
+    api._loop = InlineLoop()
+    api._handle_event_payload(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 75,
+                "picturesNumber": 1,
+            },
+        }
+    )
+    last_event = api.last_event
+    updates = []
+    api.add_listener(lambda: updates.append(True))
+    payload = {
+        "eventType": event_type,
+        "eventState": event_state,
+        "eventDescription": "videoloss alarm",
+        "dateTime": "2026-09-09T10:34:16-03:00",
+        "activePostCount": 1,
+        "channelID": 1,
+    }
+    if content_type == "application/json":
+        body = json.dumps(payload).encode()
+    else:
+        body = (
+            '<EventNotificationAlert xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            + "".join(f"<{key}>{value}</{key}>" for key, value in payload.items())
+            + "</EventNotificationAlert>"
+        ).encode()
+
+    for _ in range(3):
+        api._handle_part({"content-type": content_type}, body)
+
+    assert api.last_event is last_event
+    assert updates == []
+    api._handle_part({"content-type": "image/jpeg"}, b"access-picture")
+    assert api.latest_picture == b"access-picture"
+    assert updates == [True]
+
+
+@pytest.mark.parametrize("event_state", ["active", None, "unexpected"])
+def test_videoloss_without_inactive_state_remains_diagnostic(event_state) -> None:
+    api = _api()
+    api._handle_event_payload(
+        {"eventType": "videoloss", "eventState": event_state, "channelID": 1}
+    )
+
+    assert api.last_event["event"] == "unknown_isapi_event"
+    assert api.last_event["raw_event_type"] == "videoloss"
+    assert api.last_event["event_state"] == event_state
+    assert api.last_event["event_data"] == {"channelID": 1}
 
 
 def test_thermal_image_does_not_replace_visible_access_picture() -> None:

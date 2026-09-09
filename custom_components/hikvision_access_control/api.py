@@ -385,6 +385,13 @@ class HikvisionAccessAPI:
         """Route one decoded ISAPI event payload."""
         raw_event_type = str(payload.get("eventType") or "unknown")
         event_type = raw_event_type.casefold()
+        # ISAPI also uses inactive videoloss alerts as stream heartbeats.
+        # Ignore them before changing event or pending picture state.
+        if event_type == "heartbeat" or (
+            event_type == "videoloss"
+            and str(payload.get("eventState") or "").casefold() == "inactive"
+        ):
+            return
         if event_type == "accesscontrollerevent":
             self._handle_event(payload)
             return
@@ -395,9 +402,6 @@ class HikvisionAccessAPI:
 
         self._pending_picture_parts = 0
         self._pending_picture_target = None
-        if event_type == "heartbeat":
-            return
-
         common_fields = {
             "eventType",
             "eventState",

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Ignore ISAPI `videoloss` notifications with an `inactive` state, which are
+  stream heartbeats, so they do not overwrite the latest access event or flood
+  its history with unknown events. Active video-loss alerts remain available.
+- Preserve pending access pictures when a heartbeat arrives before the image.
+
 ## [0.1.4] - 2026-09-08
 
 ### Added

@@ -188,6 +188,10 @@ mode: queued
   `event_type`. No sensor “Último evento”, `unknown_access_event` indica uma
   combinação ainda não classificada — os atributos `major` e `sub_event` mostram
   o código recebido. `unknown_isapi_event` traz o tipo em `raw_event_type`.
+  Heartbeats (`heartBeat` ou `videoloss` com `eventState: inactive`) são ignorados
+  e não substituem o último evento. A correção não remove registros antigos do
+  histórico; outros tipos ainda não classificados continuam disponíveis para
+  diagnóstico.
 - **Sem foto:** gere uma autenticação facial. Eventos de relé normalmente não
   carregam JPEG. Para a campainha, confirme também que o usuário ISAPI pode ler
   `/Streaming/channels/101/picture`.
