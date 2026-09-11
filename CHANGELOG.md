@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-11
+
 ### Added
 
 - Classify the observed Hikvision events `2/39` (network disconnected), `2/1031`
