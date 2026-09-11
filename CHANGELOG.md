@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Classify the observed Hikvision events `2/39` (network disconnected), `2/1031`
+  (network restored), `2/1040` (secure door control unit online), and `3/112`
+  (remote login) instead of exposing them as unknown access events.
+
 ## [0.1.7] - 2026-09-09
 
 ### Added
@@ -12,8 +18,6 @@ All notable changes to this project will be documented in this file.
   ISAPI payload, event classification, ignored multipart parts, and door actions.
   Debug payloads redact personal and network identifiers and never include JPEGs;
   unclassified access and ISAPI events are warnings in the default log.
-- Classify the observed Hikvision operation event `3/112` (`0x70`) as a remote
-  login instead of an unknown access event.
 
 ## [0.1.6] - 2026-09-09
 
