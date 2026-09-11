@@ -325,6 +325,7 @@ def test_only_confirmed_major_and_sub_event_pairs_are_classified() -> None:
         (5, 76, "authentication_failed"),
         (1, "0x404", "device_tamper_alarm"),
         (1, "0x40f", "security_module_tamper_alarm"),
+        (3, 112, "remote_login"),
     ],
 )
 def test_documented_access_and_security_events_are_classified(

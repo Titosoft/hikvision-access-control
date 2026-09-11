@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
   ISAPI payload, event classification, ignored multipart parts, and door actions.
   Debug payloads redact personal and network identifiers and never include JPEGs;
   unclassified access and ISAPI events are warnings in the default log.
+- Classify the observed Hikvision operation event `3/112` (`0x70`) as a remote
+  login instead of an unknown access event.
 
 ## [0.1.6] - 2026-09-09
 

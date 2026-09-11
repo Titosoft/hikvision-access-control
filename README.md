@@ -53,6 +53,7 @@ Hikvision. Entre os eventos classificados estão:
 - `majorEventType: 5`, `subEventType: 37` (`0x25`): campainha tocando;
 - `majorEventType: 5`, `subEventType: 51` (`0x33`): chamada à central;
 - `eventType: changedCallStatus` com `status: ring`: chamada de vídeo porteiro;
+- `majorEventType: 3`, `subEventType: 112` (`0x70`): login remoto no terminal;
 - `5/25` a `5/28`: porta aberta, fechada, aberta de forma anormal ou por tempo
   excessivo;
 - `1/0x404`, `1/0x406` e `1/0x40f`: violação do terminal, leitor ou módulo de

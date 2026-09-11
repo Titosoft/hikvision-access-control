@@ -22,6 +22,7 @@ EVENT_LABELS: dict[tuple[int, int], str] = {
     (1, 0x40C): "authentication_attempts_exceeded",
     (1, 0x40F): "security_module_tamper_alarm",
     (1, 0x410): "security_module_tamper_restored",
+    (3, 0x70): "remote_login",
     (5, 1): "card_authenticated",
     (5, 2): "card_pin_authenticated",
     (5, 3): "authentication_failed",
