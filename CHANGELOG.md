@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-12
+
 ### Added
 
 - Optional isolated Home Assistant add-on that logs in through HCNetSDK port 8000,
