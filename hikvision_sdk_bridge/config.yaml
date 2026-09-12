@@ -1,5 +1,5 @@
 name: Hikvision SDK Bridge
-version: "0.1.2"
+version: "0.1.10"
 slug: hikvision_sdk_bridge
 description: Receives Hikvision HCNetSDK intercom callbacks without polling
 url: https://github.com/Titosoft/hikvision-access-control

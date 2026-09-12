@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-09-12
+
 ### Changed
 
 - Package architecture-specific HCNetSDK runtimes inside prebuilt AMD64 and
