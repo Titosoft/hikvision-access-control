@@ -1,5 +1,12 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM}
+FROM debian:bookworm-slim
+
+ARG BUILD_VERSION="dev"
+ARG BUILD_ARCH="unknown"
+
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="app" \
+    io.hass.arch="${BUILD_ARCH}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends bash ca-certificates jq python3 \

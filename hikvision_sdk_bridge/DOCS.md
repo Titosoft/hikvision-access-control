@@ -20,6 +20,9 @@ the files above. Mixing architectures or releases can prevent the add-on from
 starting. The add-on uses a Debian/glibc base because the official Hikvision
 Linux runtime is not compatible with Alpine/musl.
 
+Supported Home Assistant architectures are `aarch64` and `amd64`. Current Home
+Assistant releases no longer support `armv7` apps.
+
 ## Configuration
 
 - `device_host`: IP address used by the Hikvision Access Control integration.

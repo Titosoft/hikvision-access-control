@@ -141,11 +141,12 @@ canal de alarmes. Não consulta repetidamente o estado do terminal.
 5. Inicie o add-on. O log deve mostrar `HCNetSDK alarm channel armed` e a entidade
    **Conexão da ponte SDK** deve ficar `Online`.
 
-Não misture bibliotecas `amd64`, `aarch64` ou `armv7`. No Raspberry Pi, confirme
-que o pacote oficial escolhido contém binários para a arquitetura exata do
-sistema. O add-on usa uma base Debian/glibc compatível com o runtime Linux da
-Hikvision. A ponte roda em processo separado para que uma falha numa biblioteca
-nativa não encerre o Home Assistant Core.
+Não misture bibliotecas `amd64` e `aarch64`. No Raspberry Pi, confirme que o
+Home Assistant e o pacote oficial usam `aarch64`; sistemas `armv7` não são mais
+suportados pelas versões atuais do Home Assistant. O add-on usa uma base
+Debian/glibc compatível com o runtime Linux da Hikvision. A ponte roda em processo
+separado para que uma falha numa biblioteca nativa não encerre o Home Assistant
+Core.
 
 O callback `COMM_ALARM_BUTTON_DOWN_EXCEPTION` (`0x1152`) liga imediatamente o
 binary sensor **Campainha tocando**. Eventos `changedCallStatus` recebidos como
