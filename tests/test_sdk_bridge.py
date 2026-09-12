@@ -10,11 +10,36 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).parents[1] / "hikvision_sdk_bridge" / "bridge.py"
+APP_PATH = MODULE_PATH.parent
 SPEC = spec_from_file_location("hikvision_sdk_bridge_test", MODULE_PATH)
 assert SPEC and SPEC.loader
 BRIDGE = module_from_spec(SPEC)
 sys.modules[SPEC.name] = BRIDGE
 SPEC.loader.exec_module(BRIDGE)
+
+
+def test_app_packages_native_sdk_for_each_supported_architecture() -> None:
+    expected_machine = {"amd64": b"\x3e\x00", "aarch64": b"\xb7\x00"}
+
+    for architecture, machine in expected_machine.items():
+        library = APP_PATH / f"lib-{architecture}" / "libhcnetsdk.so"
+        header = library.read_bytes()[:20]
+        assert header[:4] == b"\x7fELF"
+        assert header[18:20] == machine
+        assert (library.parent / "HCNetSDKCom").is_dir()
+
+
+def test_app_uses_prebuilt_image_without_share_library_option() -> None:
+    config = (APP_PATH / "config.yaml").read_text()
+    dockerfile = (APP_PATH / "Dockerfile").read_text()
+    run_script = (APP_PATH / "run.sh").read_text()
+
+    assert "image: ghcr.io/titosoft/hikvision-sdk-bridge" in config
+    assert "/share/hikvision_sdk" not in config
+    assert "share:ro" not in config
+    assert "COPY lib-${BUILD_ARCH}/" in dockerfile
+    assert "/opt/hikvision_sdk_bridge/lib/libhcnetsdk.so" in run_script
+    assert ".sdk_library" not in run_script
 
 
 class CapturingPublisher:

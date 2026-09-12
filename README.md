@@ -23,8 +23,9 @@ versão publicada deve ser validada no DS-K1T344MX-E1 real antes de ser consider
 homologada para produção. Outros modelos e firmwares não estão confirmados.
 
 O uso da ponte SDK foi preparado para o firmware do DS-K1T344 que anuncia
-**SDK Server** na porta 8000. Como o HCNetSDK é proprietário, o repositório não
-inclui nem redistribui as bibliotecas da Hikvision.
+**SDK Server** na porta 8000. O App inclui runtimes HCNetSDK separados para
+`aarch64` e `amd64`; esses binários de terceiros não são cobertos pela licença
+MIT deste projeto.
 
 ## Funcionalidades e entidades
 
@@ -129,22 +130,18 @@ A integração aceita eventos do add-on **Hikvision SDK Bridge**. O add-on faz u
 login persistente na porta 8000, registra o callback global do HCNetSDK e arma o
 canal de alarmes. Não consulta repetidamente o estado do terminal.
 
-1. Baixe o **Device Network SDK para Linux** no
-   [site oficial da Hikvision](https://pro-av.hikvision.com/us-en/support/download/sdk/)
-   para a mesma arquitetura do Home Assistant.
-2. Copie `libhcnetsdk.so` e todas as dependências da mesma distribuição para
-   `/share/hikvision_sdk/lib`. Preserve a subpasta `HCNetSDKCom`.
-3. Em **Configurações → Complementos → Loja de complementos → Repositórios**,
+1. Em **Configurações → Complementos → Loja de complementos → Repositórios**,
    adicione `https://github.com/Titosoft/hikvision-access-control`.
-4. Instale **Hikvision SDK Bridge** e configure o IP do mesmo terminal usado na
-   integração, porta `8000`, usuário local, senha e o caminho da biblioteca.
-5. Inicie o add-on. O log deve mostrar `HCNetSDK alarm channel armed` e a entidade
+2. Instale **Hikvision SDK Bridge** e configure o IP do mesmo terminal usado na
+   integração, porta `8000`, usuário local e senha.
+3. Inicie o add-on. O Supervisor baixa a imagem nativa para a arquitetura do host;
+   não é necessário copiar bibliotecas para `/share`.
+4. O log deve mostrar `HCNetSDK alarm channel armed` e a entidade
    **Conexão da ponte SDK** deve ficar `Online`.
 
-Não misture bibliotecas `amd64` e `aarch64`. No Raspberry Pi, confirme que o
-Home Assistant e o pacote oficial usam `aarch64`; sistemas `armv7` não são mais
-suportados pelas versões atuais do Home Assistant. O add-on usa uma base
-Debian/glibc compatível com o runtime Linux da Hikvision. A ponte roda em processo
+No Raspberry Pi, o Home Assistant precisa usar `aarch64`; sistemas `armv7` não
+são suportados pelas versões atuais do Home Assistant. A imagem usa uma base
+Debian/glibc compatível com o runtime Linux empacotado. A ponte roda em processo
 separado para que uma falha numa biblioteca nativa não encerre o Home Assistant
 Core.
 

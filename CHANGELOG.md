@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Package architecture-specific HCNetSDK runtimes inside prebuilt AMD64 and
+  AArch64 add-on images, removing the manual `/share/hikvision_sdk` setup.
+- Publish a multi-architecture SDK bridge image to GHCR for each project release.
+
 ## [0.1.9] - 2026-09-12
 
 ### Added

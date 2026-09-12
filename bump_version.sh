@@ -37,6 +37,7 @@ done
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 manifest=custom_components/hikvision_access_control/manifest.json
+app_config=hikvision_sdk_bridge/config.yaml
 if [[ -n ${PYTHON:-} ]]; then
   python_bin=$PYTHON
 elif [[ -x .venv/bin/python ]]; then
@@ -52,14 +53,14 @@ trap 'rm -rf -- "$release_tmp"' EXIT
 release_phase=preparação
 trap 'printf "Falha na etapa: %s. Execução interrompida; confira git status antes de continuar.\n" "$release_phase" >&2' ERR
 
-"$python_bin" - "$manifest" "$bump" "$release_tmp" <<'PY'
+"$python_bin" - "$manifest" "$app_config" "$bump" "$release_tmp" <<'PY'
 import datetime
 import json
 from pathlib import Path
 import re
 import sys
 
-manifest_path, bump, output = sys.argv[1:]
+manifest_path, app_config_path, bump, output = sys.argv[1:]
 destination = Path(output)
 manifest = json.loads(Path(manifest_path).read_text())
 pattern = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
@@ -93,7 +94,20 @@ if re.search(rf"^## \[{re.escape(version)}\]", changelog, re.MULTILINE):
 dated_heading = f"## [Unreleased]\n\n## [{version}] - {datetime.date.today().isoformat()}"
 changelog = changelog[:heading.start()] + dated_heading + changelog[heading.end():]
 manifest["version"] = version
+app_config = Path(app_config_path)
+app_text = app_config.read_text()
+app_version = re.search(
+    rf'^version:\s*(["\']?)({pattern})\1[ \t]*$', app_text, re.MULTILINE
+)
+if not app_version:
+    sys.exit(f"Versão do App inválida ou ausente em {app_config_path}.")
+app_text = (
+    app_text[:app_version.start(2)]
+    + version
+    + app_text[app_version.end(2):]
+)
 (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+(destination / "app-config.yaml").write_text(app_text)
 (destination / "CHANGELOG.md").write_text(changelog)
 (destination / "notes.md").write_text(notes + "\n")
 (destination / "versions").write_text(f"{current} {version}\n")
@@ -104,7 +118,7 @@ tag="v$new_version"
 printf 'Versão: %s -> %s\nTag: %s\n\nNotas da release:\n' "$current_version" "$new_version" "$tag"
 cat "$release_tmp/notes.md"
 if "$dry_run"; then
-  printf '\nSimulação: atualizar manifest/changelog, validar, commitar, enviar main e tag, publicar no GitHub.\n'
+  printf '\nSimulação: atualizar integração/App/changelog, validar, commitar, enviar main e tag, publicar no GitHub.\n'
   exit 0
 fi
 
@@ -155,8 +169,9 @@ git diff --check
 
 release_phase=commit
 cp "$release_tmp/manifest.json" "$manifest"
+cp "$release_tmp/app-config.yaml" "$app_config"
 cp "$release_tmp/CHANGELOG.md" CHANGELOG.md
-git add -- "$manifest" CHANGELOG.md
+git add -- "$manifest" "$app_config" CHANGELOG.md
 git commit -m "Release $tag"
 git tag -a "$tag" -m "Release $tag"
 

@@ -13,6 +13,7 @@ import pytest
 
 SCRIPT = Path(__file__).parents[1] / "bump_version.sh"
 MANIFEST = "custom_components/hikvision_access_control/manifest.json"
+APP_CONFIG = "hikvision_sdk_bridge/config.yaml"
 
 
 def command(cwd, *args, env=None, check=True):
@@ -42,6 +43,9 @@ def release_repo(tmp_path):
     manifest = repo / MANIFEST
     manifest.parent.mkdir(parents=True)
     manifest.write_text('{"domain": "hikvision_access_control", "version": "0.1.4"}\n')
+    app_config = repo / APP_CONFIG
+    app_config.parent.mkdir(parents=True)
+    app_config.write_text('name: Hikvision SDK Bridge\nversion: "0.1.1"\n')
     (repo / "hacs.json").write_text("{}\n")
     (repo / "CHANGELOG.md").write_text(
         "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n"
@@ -104,6 +108,7 @@ def test_dry_run_does_not_change_files_or_publish(release_repo, bump, expected):
     assert f"0.1.4 -> {expected}" in result.stdout
     assert command(repo, "git", "status", "--porcelain", env=env).stdout == before
     assert json.loads((repo / MANIFEST).read_text())["version"] == "0.1.4"
+    assert 'version: "0.1.1"' in (repo / APP_CONFIG).read_text()
     assert not Path(env["GH_TEST_RESULT"]).exists()
 
 
@@ -111,6 +116,7 @@ def test_release_updates_versions_pushes_tag_and_publishes_notes(release_repo):
     repo, remote, env = release_repo
     command(repo, "bash", "bump_version.sh", env=env)
     assert json.loads((repo / MANIFEST).read_text())["version"] == "0.1.5"
+    assert 'version: "0.1.5"' in (repo / APP_CONFIG).read_text()
     changelog = (repo / "CHANGELOG.md").read_text()
     assert "## [Unreleased]\n\n## [0.1.5] - " in changelog
     assert "## [0.1.4] - 2026-09-08" in changelog
@@ -125,7 +131,7 @@ def test_release_updates_versions_pushes_tag_and_publishes_notes(release_repo):
     changed = command(
         repo, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD", env=env
     )
-    assert set(changed.stdout.splitlines()) == {MANIFEST, "CHANGELOG.md"}
+    assert set(changed.stdout.splitlines()) == {MANIFEST, APP_CONFIG, "CHANGELOG.md"}
     release = json.loads(Path(env["GH_TEST_RESULT"]).read_text())
     assert release["args"][2] == "v0.1.5"
     assert "--verify-tag" in release["args"]
@@ -186,6 +192,7 @@ def test_preflight_or_validation_failure_does_not_bump(release_repo, problem):
     result = command(repo, "bash", "bump_version.sh", *args, env=env, check=False)
     assert result.returncode != 0
     assert json.loads((repo / MANIFEST).read_text())["version"] == "0.1.4"
+    assert 'version: "0.1.1"' in (repo / APP_CONFIG).read_text()
     assert command(repo, "git", "rev-parse", "HEAD", env=env).stdout == before
     assert not Path(env["GH_TEST_RESULT"]).exists()
 

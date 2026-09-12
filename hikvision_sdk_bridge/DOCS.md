@@ -6,19 +6,10 @@ not poll the device.
 
 ## Before installing
 
-The Hikvision runtime is proprietary and is not included. Download the Device
-Network SDK for Linux from Hikvision and use the package matching the Home
-Assistant host architecture. Copy the complete runtime library set to:
-
-```text
-/share/hikvision_sdk/lib/libhcnetsdk.so
-/share/hikvision_sdk/lib/HCNetSDKCom/...
-```
-
-Keep any OpenSSL and component `.so` files from that same SDK release alongside
-the files above. Mixing architectures or releases can prevent the add-on from
-starting. The add-on uses a Debian/glibc base because the official Hikvision
-Linux runtime is not compatible with Alpine/musl.
+The prebuilt image includes the matching HCNetSDK runtime for each supported
+architecture. No manual download or `/share/hikvision_sdk` directory is needed.
+The add-on uses a Debian/glibc base and selects only the matching library folder
+while building each image.
 
 Supported Home Assistant architectures are `aarch64` and `amd64`. Current Home
 Assistant releases no longer support `armv7` apps.
@@ -28,7 +19,6 @@ Assistant releases no longer support `armv7` apps.
 - `device_host`: IP address used by the Hikvision Access Control integration.
 - `device_port`: SDK Server port, normally `8000`.
 - `username` and `password`: local terminal credentials allowed to use HCNetSDK.
-- `sdk_library`: full path to `libhcnetsdk.so` under `/share`.
 
 After starting, look for `HCNetSDK alarm channel armed` in the log. The custom
 integration will show **SDK bridge connection: Online** and update its
