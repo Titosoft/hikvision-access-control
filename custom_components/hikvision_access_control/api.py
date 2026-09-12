@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import re
@@ -16,12 +18,24 @@ from typing import Any
 import requests
 from requests.auth import HTTPDigestAuth
 
-from .const import AUTH_SUCCESS_EVENTS, DOORBELL_EVENTS, EVENT_LABELS
+from .const import (
+    AUTH_SUCCESS_EVENTS,
+    DOORBELL_EVENTS,
+    EVENT_LABELS,
+    SDK_COMMAND_ACS_ALARM,
+    SDK_COMMAND_BUTTON_DOWN,
+    SDK_COMMAND_CONFERENCE_CALL,
+    SDK_COMMAND_ISAPI_ALARM,
+    SDK_COMMAND_VCA_ALARM,
+    SDK_COMMAND_VIDEO_INTERCOM_ALARM,
+    SDK_COMMAND_VIDEO_INTERCOM_EVENT,
+)
 from .parser import HikvisionMultipartParser
 
 _LOGGER = logging.getLogger(__name__)
 
 DOORBELL_DEDUPLICATION_SECONDS = 5
+DOORBELL_RING_TIMEOUT_SECONDS = 45
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
 LOG_REDACTED = "**REDACTED**"
@@ -38,6 +52,31 @@ LOG_SENSITIVE_FIELDS = {
     "name",
     "pictureurl",
     "picuri",
+}
+RINGING_CALL_STATUSES = {"ring", "ringing", "callwaiting", "call_waiting"}
+IDLE_CALL_STATUSES = {
+    "answered",
+    "busy",
+    "callend",
+    "call_end",
+    "connected",
+    "end",
+    "ended",
+    "free",
+    "hangup",
+    "hang_up",
+    "hungup",
+    "idle",
+    "nocall",
+    "no_call",
+    "talk",
+    "talking",
+}
+SDK_INTERCOM_COMMANDS = {
+    SDK_COMMAND_VIDEO_INTERCOM_EVENT,
+    SDK_COMMAND_VIDEO_INTERCOM_ALARM,
+    SDK_COMMAND_CONFERENCE_CALL,
+    SDK_COMMAND_VCA_ALARM,
 }
 
 
@@ -89,6 +128,9 @@ class HikvisionAccessAPI:
         self.unique_id = host
 
         self.available = False
+        self.sdk_connected: bool | None = None
+        self.last_sdk_command: int | None = None
+        self.doorbell_ringing = False
         self.last_event: dict[str, Any] | None = None
         self.last_auth: dict[str, Any] | None = None
         self.last_result: str | None = None
@@ -107,6 +149,10 @@ class HikvisionAccessAPI:
         self._visitor_pending_event: dict[str, Any] | None = None
         self._last_doorbell_identity: tuple[str, str] | None = None
         self._last_doorbell_seen = 0.0
+
+        self._doorbell_lock = threading.Lock()
+        self._doorbell_timer: threading.Timer | None = None
+        self._doorbell_token: object | None = None
 
         self._listeners: set[Callable[[], None]] = set()
         self._listeners_lock = threading.Lock()
@@ -202,9 +248,7 @@ class HikvisionAccessAPI:
     def start(self, loop: AbstractEventLoop) -> None:
         """Start the background event stream."""
         if self._thread and self._thread.is_alive():
-            _LOGGER.debug(
-                "Hikvision event stream for %s is already running", self.host
-            )
+            _LOGGER.debug("Hikvision event stream for %s is already running", self.host)
             return
         self._loop = loop
         self._stop.clear()
@@ -221,6 +265,7 @@ class HikvisionAccessAPI:
         _LOGGER.debug("Stopping Hikvision event stream for %s", self.host)
         self._stop.set()
         self._cancel_visitor_snapshot()
+        self._cancel_doorbell_timeout()
         with self._stream_lock:
             response = self._response
             session = self._session
@@ -530,13 +575,141 @@ class HikvisionAccessAPI:
             },
         }
         _LOGGER.warning(
-            "Received unclassified Hikvision ISAPI event from %s "
-            "(type=%s, state=%s)",
+            "Received unclassified Hikvision ISAPI event from %s (type=%s, state=%s)",
             self.host,
             raw_event_type,
             payload.get("eventState"),
         )
         self._notify()
+
+    def handle_sdk_event(self, data: dict[str, Any]) -> None:
+        """Handle an alarm delivered by the isolated HCNetSDK bridge."""
+        kind = str(data.get("kind") or "alarm").casefold()
+        if kind == "bridge_status":
+            status = str(data.get("status") or "").casefold()
+            connected = (
+                True if status == "online" else False if status == "offline" else None
+            )
+            changed = self.sdk_connected != connected
+            if changed:
+                self.sdk_connected = connected
+                self._notify()
+            log_status = _LOGGER.info if changed else _LOGGER.debug
+            log_status(
+                "Hikvision SDK bridge for %s is %s",
+                self.host,
+                status or "unknown",
+            )
+            return
+
+        command = self._to_int(data.get("command"))
+        self.sdk_connected = True
+        self.last_sdk_command = command
+        _LOGGER.debug(
+            "Received Hikvision SDK alarm from %s (command=%s, command_hex=%s)",
+            self.host,
+            command,
+            data.get("command_hex"),
+        )
+
+        if command == SDK_COMMAND_BUTTON_DOWN:
+            self._handle_sdk_button_press(data)
+            return
+
+        if command == SDK_COMMAND_ACS_ALARM:
+            major = self._to_int(data.get("major"))
+            minor = self._to_int(data.get("minor"))
+            if (major, minor) in DOORBELL_EVENTS:
+                self._handle_event(
+                    {
+                        "eventType": "AccessControllerEvent",
+                        "eventState": "active",
+                        "dateTime": data.get("received_at"),
+                        "AccessControllerEvent": {
+                            "majorEventType": major,
+                            "subEventType": minor,
+                        },
+                    }
+                )
+            return
+
+        payload = self._decode_sdk_payload(data)
+        if payload is not None:
+            self._handle_event_payload(payload)
+            return
+
+        if command in SDK_INTERCOM_COMMANDS or command == SDK_COMMAND_ISAPI_ALARM:
+            self.last_event = {
+                "event": "unknown_sdk_event",
+                "sdk_command": command,
+                "sdk_command_hex": data.get("command_hex"),
+                "date_time": data.get("received_at"),
+                "payload_type": data.get("payload_type"),
+            }
+            _LOGGER.warning(
+                "Received unclassified Hikvision SDK intercom alarm from %s "
+                "(command=%s)",
+                self.host,
+                command,
+            )
+            self._notify()
+
+    def _handle_sdk_button_press(self, data: dict[str, Any]) -> None:
+        """Convert the HCNetSDK physical-button callback to a doorbell event."""
+        now = time.monotonic()
+        if now - self._last_doorbell_seen < DOORBELL_DEDUPLICATION_SECONDS:
+            _LOGGER.debug("Ignored duplicate HCNetSDK doorbell button notification")
+            return
+        self._last_doorbell_identity = ("sdk", "button")
+        self._last_doorbell_seen = now
+        self._set_doorbell_ringing(True)
+        normalized = {
+            "event": "doorbell_ringing",
+            "major": None,
+            "sub_event": None,
+            "serial_no": None,
+            "date_time": data.get("received_at"),
+            "door_no": None,
+            "raw_event_type": "sdk_button_down",
+            "event_state": "active",
+            "call_status": "ring",
+            "call_command": "button_down",
+            "caller_id": None,
+            "sdk_command": SDK_COMMAND_BUTTON_DOWN,
+            "sdk_command_hex": "0x1152",
+            "pictures_number": 0,
+            "active_post_count": None,
+            "picture_available": False,
+            "picture_source": None,
+        }
+        self.last_event = normalized
+        _LOGGER.info("Hikvision doorbell button pressed on %s via HCNetSDK", self.host)
+        self._schedule_visitor_snapshot(normalized)
+
+    def _decode_sdk_payload(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Decode an XML or JSON EventNotificationAlert from the SDK bridge."""
+        encoded = data.get("payload_b64")
+        if not isinstance(encoded, str) or not encoded:
+            return None
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError, TypeError):
+            _LOGGER.warning("Ignored invalid base64 payload from SDK bridge")
+            return None
+
+        try:
+            if raw.lstrip().startswith(b"{"):
+                payload = json.loads(raw.decode("utf-8"))
+                return payload if isinstance(payload, dict) else None
+            if raw.lstrip().startswith(b"<"):
+                root = ET.fromstring(raw)
+                return self._xml_event_payload(root)
+        except (UnicodeDecodeError, json.JSONDecodeError, ET.ParseError):
+            _LOGGER.warning(
+                "Ignored malformed %s payload from SDK bridge",
+                data.get("payload_type") or "alarm",
+            )
+        return None
 
     def _handle_changed_call_status(self, payload: dict[str, Any]) -> bool:
         """Convert a documented intercom ring status to a doorbell event."""
@@ -550,14 +723,29 @@ class HikvisionAccessAPI:
         )
         if not isinstance(call_status, dict):
             return False
-        status = str(call_status.get("status") or "").casefold()
-        if status != "ring":
+        status = str(call_status.get("status") or "").strip().casefold()
+        if status in IDLE_CALL_STATUSES:
+            self._set_doorbell_ringing(False)
+            _LOGGER.debug(
+                "Hikvision intercom on %s left the ringing state (%s)",
+                self.host,
+                status,
+            )
+            return True
+        if status not in RINGING_CALL_STATUSES:
             return False
 
         detail = {
             "serialNo": f"call:{call_status.get('callerId') or 'unknown'}",
             "doorNo": call_status.get("doorNo"),
         }
+        if (
+            self.doorbell_ringing
+            and time.monotonic() - self._last_doorbell_seen
+            < DOORBELL_DEDUPLICATION_SECONDS
+        ):
+            _LOGGER.debug("Ignored duplicate intercom ring notification")
+            return True
         if self._is_duplicate_doorbell(payload, detail):
             _LOGGER.debug("Ignored duplicate intercom ring notification")
             return True
@@ -579,6 +767,7 @@ class HikvisionAccessAPI:
             "picture_available": False,
             "picture_source": None,
         }
+        self._set_doorbell_ringing(True)
         self._pending_picture_parts = 0
         self._pending_picture_target = None
         self.last_event = normalized
@@ -667,6 +856,8 @@ class HikvisionAccessAPI:
         )
         if self._pending_picture_parts == 0:
             self._pending_picture_target = None
+        if event_code in DOORBELL_EVENTS:
+            self._set_doorbell_ringing(True)
         self.last_event = normalized
 
         if event_code == (5, 21):
@@ -686,6 +877,60 @@ class HikvisionAccessAPI:
 
         self._notify()
 
+    def _set_doorbell_ringing(self, ringing: bool) -> None:
+        """Update ringing state and maintain a local no-polling safety timeout."""
+        timer: threading.Timer | None = None
+        previous_timer: threading.Timer | None
+        with self._doorbell_lock:
+            previous_timer = self._doorbell_timer
+            self._doorbell_timer = None
+            self._doorbell_token = None
+            if ringing:
+                token = object()
+                timer = threading.Timer(
+                    DOORBELL_RING_TIMEOUT_SECONDS,
+                    self._expire_doorbell,
+                    args=(token,),
+                )
+                timer.daemon = True
+                self._doorbell_timer = timer
+                self._doorbell_token = token
+            changed = self.doorbell_ringing != ringing
+            self.doorbell_ringing = ringing
+        if previous_timer is not None:
+            previous_timer.cancel()
+        if timer is not None:
+            timer.start()
+        if changed:
+            self._notify()
+
+    def _expire_doorbell(self, token: object) -> None:
+        """Clear a ring when the terminal sends no explicit terminal state."""
+        with self._doorbell_lock:
+            if token is not self._doorbell_token:
+                return
+            self._doorbell_token = None
+            self._doorbell_timer = None
+            changed = self.doorbell_ringing
+            self.doorbell_ringing = False
+        if changed:
+            _LOGGER.debug(
+                "Hikvision doorbell ringing state on %s expired after %s seconds",
+                self.host,
+                DOORBELL_RING_TIMEOUT_SECONDS,
+            )
+            self._notify()
+
+    def _cancel_doorbell_timeout(self) -> None:
+        """Cancel the local ring safety timeout."""
+        with self._doorbell_lock:
+            timer = self._doorbell_timer
+            self._doorbell_timer = None
+            self._doorbell_token = None
+            self.doorbell_ringing = False
+        if timer is not None:
+            timer.cancel()
+
     def _is_duplicate_doorbell(
         self, payload: dict[str, Any], detail: dict[str, Any]
     ) -> bool:
@@ -701,11 +946,12 @@ class HikvisionAccessAPI:
 
         now = time.monotonic()
         duplicate = (
-            identity == self._last_doorbell_identity
-            and now - self._last_doorbell_seen < DOORBELL_DEDUPLICATION_SECONDS
+            now - self._last_doorbell_seen < DOORBELL_DEDUPLICATION_SECONDS
+            and (identity == self._last_doorbell_identity or self.doorbell_ringing)
         )
-        self._last_doorbell_identity = identity
-        self._last_doorbell_seen = now
+        if not duplicate:
+            self._last_doorbell_identity = identity
+            self._last_doorbell_seen = now
         return duplicate
 
     def _schedule_visitor_snapshot(self, event: dict[str, Any]) -> None:

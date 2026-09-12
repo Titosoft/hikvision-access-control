@@ -29,6 +29,9 @@ async def async_get_config_entry_diagnostics(
             "model": api.model,
             "firmware": api.firmware_version,
             "available": api.available,
+            "sdk_bridge_connected": api.sdk_connected,
+            "last_sdk_command": api.last_sdk_command,
+            "doorbell_ringing": api.doorbell_ringing,
         },
         "last_event": async_redact_data(dict(api.last_event or {}), EVENT_TO_REDACT),
     }

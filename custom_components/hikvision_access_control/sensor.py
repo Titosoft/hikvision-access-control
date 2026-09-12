@@ -17,7 +17,8 @@ from .entity import HikvisionAccessEntity, async_get_unknown_event_labels
 from .event_display import event_display_type
 
 EVENT_OPTIONS = sorted(
-    set(EVENT_LABELS.values()) | {"unknown_access_event", "unknown_isapi_event"}
+    set(EVENT_LABELS.values())
+    | {"unknown_access_event", "unknown_isapi_event", "unknown_sdk_event"}
 )
 
 
@@ -32,6 +33,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             HikvisionConnectionSensor(api),
+            HikvisionSDKConnectionSensor(api),
             HikvisionLastAuthSensor(api, "last_user", "mdi:account"),
             HikvisionLastAuthSensor(api, "employee_id", "mdi:identifier"),
             HikvisionLastAuthSensor(api, "verify_mode", "mdi:face-recognition"),
@@ -61,6 +63,29 @@ class HikvisionConnectionSensor(HikvisionAccessEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         return "online" if self.api.available else "offline"
+
+
+class HikvisionSDKConnectionSensor(HikvisionAccessEntity, SensorEntity):
+    """Connection status reported by the optional HCNetSDK bridge."""
+
+    _attr_translation_key = "sdk_connection"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["offline", "online", "unknown"]
+    _attr_icon = "mdi:lan-pending"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "sdk_connection")
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> str:
+        if self.api.sdk_connected is None:
+            return "unknown"
+        return "online" if self.api.sdk_connected else "offline"
 
 
 class HikvisionLastAuthSensor(HikvisionAccessEntity, SensorEntity):
@@ -132,6 +157,10 @@ class HikvisionLastEventSensor(HikvisionAccessEntity, SensorEntity):
     def __init__(self, api, unknown_event_labels: dict[str, str]) -> None:
         super().__init__(api, "last_event")
         self._unknown_event_labels = unknown_event_labels
+
+    @property
+    def available(self) -> bool:
+        return self.api.available or self.api.sdk_connected is True
 
     @property
     def options(self) -> list[str]:

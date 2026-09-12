@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import sys
@@ -122,6 +123,12 @@ class ControlledTimer:
 
     def fire(self) -> None:
         self.function(*self.args)
+
+
+def _controlled_timer(interval: float) -> ControlledTimer:
+    return next(
+        timer for timer in ControlledTimer.created if timer.interval == interval
+    )
 
 
 def _api() -> Any:
@@ -513,7 +520,8 @@ def test_changed_call_status_ring_becomes_doorbell_event(
     assert api.last_event["raw_event_type"] == "changedCallStatus"
     assert api.last_event["call_status"] == "ring"
     assert api.last_event["call_command"] == "request"
-    assert len(ControlledTimer.created) == 1
+    assert api.doorbell_ringing is True
+    assert len(ControlledTimer.created) == 2
 
 
 def test_changed_call_status_xml_ring_becomes_doorbell_event(monkeypatch) -> None:
@@ -533,11 +541,21 @@ def test_changed_call_status_xml_ring_becomes_doorbell_event(monkeypatch) -> Non
 
     assert api.last_event["event"] == "doorbell_ringing"
     assert api.last_event["call_status"] == "ring"
-    assert len(ControlledTimer.created) == 1
+    assert api.doorbell_ringing is True
+    assert len(ControlledTimer.created) == 2
 
 
-def test_changed_call_status_other_state_remains_diagnostic() -> None:
+def test_changed_call_status_idle_clears_ringing_without_new_event(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
     api = _api()
+    api._handle_event_payload(
+        {
+            "eventType": "changedCallStatus",
+            "ChangedCallStatus": {"CallStatus": {"cmd": "request", "status": "ring"}},
+        }
+    )
+    ring_event = api.last_event
     api._handle_event_payload(
         {
             "eventType": "changedCallStatus",
@@ -545,8 +563,8 @@ def test_changed_call_status_other_state_remains_diagnostic() -> None:
         }
     )
 
-    assert api.last_event["event"] == "unknown_isapi_event"
-    assert api.last_event["raw_event_type"] == "changedCallStatus"
+    assert api.doorbell_ringing is False
+    assert api.last_event is ring_event
 
 
 def test_heartbeat_is_not_exposed_as_diagnostic_event() -> None:
@@ -676,8 +694,9 @@ def test_doorbell_attachment_becomes_visitor_picture(monkeypatch) -> None:
     )
 
     assert api.last_event["event"] == "doorbell_ringing"
-    assert updates == []
-    assert len(ControlledTimer.created) == 1
+    assert api.doorbell_ringing is True
+    assert updates == [True]
+    assert len(ControlledTimer.created) == 2
 
     jpeg = b"\xff\xd8visitor-from-event\xff\xd9"
     api._handle_part(
@@ -692,8 +711,8 @@ def test_doorbell_attachment_becomes_visitor_picture(monkeypatch) -> None:
     assert api.latest_picture is None
     assert api.last_event["picture_available"] is True
     assert api.last_event["picture_source"] == "event_attachment"
-    assert ControlledTimer.created[0].cancelled is True
-    assert updates == [True]
+    assert _controlled_timer(API_MODULE.DOORBELL_SNAPSHOT_DELAY_SECONDS).cancelled
+    assert updates == [True, True]
 
 
 def test_call_center_access_event_is_treated_as_doorbell(monkeypatch) -> None:
@@ -714,7 +733,8 @@ def test_call_center_access_event_is_treated_as_doorbell(monkeypatch) -> None:
     )
 
     assert api.last_event["event"] == "doorbell_ringing"
-    assert len(ControlledTimer.created) == 1
+    assert api.doorbell_ringing is True
+    assert len(ControlledTimer.created) == 2
 
 
 def test_doorbell_without_attachment_uses_snapshot_fallback(monkeypatch) -> None:
@@ -745,7 +765,7 @@ def test_doorbell_without_attachment_uses_snapshot_fallback(monkeypatch) -> None
             },
         }
     )
-    ControlledTimer.created[0].fire()
+    _controlled_timer(API_MODULE.DOORBELL_SNAPSHOT_DELAY_SECONDS).fire()
 
     assert captured[0]["method"] == "GET"
     assert captured[0]["url"].endswith("/Streaming/channels/101/picture")
@@ -753,7 +773,7 @@ def test_doorbell_without_attachment_uses_snapshot_fallback(monkeypatch) -> None
     assert api.latest_visitor_picture == jpeg
     assert api.last_event["picture_available"] is True
     assert api.last_event["picture_source"] == "snapshot"
-    assert updates == [True]
+    assert updates == [True, True]
 
 
 def test_doorbell_is_published_when_snapshot_fails(monkeypatch) -> None:
@@ -780,13 +800,13 @@ def test_doorbell_is_published_when_snapshot_fails(monkeypatch) -> None:
             },
         }
     )
-    ControlledTimer.created[0].fire()
+    _controlled_timer(API_MODULE.DOORBELL_SNAPSHOT_DELAY_SECONDS).fire()
 
     assert api.last_event["event"] == "doorbell_ringing"
     assert api.last_event["picture_available"] is False
     assert api.last_event["picture_source"] is None
     assert api.latest_visitor_picture is None
-    assert updates == [True]
+    assert updates == [True, True]
 
 
 def test_duplicate_doorbell_notification_is_suppressed(monkeypatch) -> None:
@@ -810,7 +830,94 @@ def test_duplicate_doorbell_notification_is_suppressed(monkeypatch) -> None:
     api._handle_event(event)
 
     assert api.last_event is first_event
-    assert len(ControlledTimer.created) == 1
+    assert len(ControlledTimer.created) == 2
+
+
+def test_sdk_button_callback_sets_ringing_and_expires(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    api._loop = InlineLoop()
+    updates: list[bool] = []
+    api.add_listener(lambda: updates.append(True))
+
+    api.handle_sdk_event(
+        {
+            "kind": "alarm",
+            "command": "0x1152",
+            "command_hex": "0x1152",
+            "received_at": "2026-09-12T12:00:00+00:00",
+        }
+    )
+
+    assert api.doorbell_ringing is True
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["raw_event_type"] == "sdk_button_down"
+    assert api.last_sdk_command == 0x1152
+    assert api.sdk_connected is True
+    assert updates == [True]
+
+    _controlled_timer(API_MODULE.DOORBELL_RING_TIMEOUT_SECONDS).fire()
+
+    assert api.doorbell_ringing is False
+    assert updates == [True, True]
+
+
+def test_sdk_isapi_payload_reuses_call_status_parser(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    payload = {
+        "eventType": "changedCallStatus",
+        "ChangedCallStatus": {"CallStatus": {"cmd": "request", "status": "ringing"}},
+    }
+
+    api.handle_sdk_event(
+        {
+            "kind": "alarm",
+            "command": 0x6009,
+            "command_hex": "0x6009",
+            "payload_type": "json",
+            "payload_b64": base64.b64encode(json.dumps(payload).encode()).decode(),
+        }
+    )
+
+    assert api.doorbell_ringing is True
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["call_status"] == "ringing"
+
+
+def test_sdk_acs_doorbell_event_reuses_access_event_parser(monkeypatch) -> None:
+    ControlledTimer.created.clear()
+    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
+    api = _api()
+    api._loop = InlineLoop()
+
+    api.handle_sdk_event(
+        {
+            "kind": "alarm",
+            "command": 0x5002,
+            "command_hex": "0x5002",
+            "major": 5,
+            "minor": 0x33,
+            "received_at": "2026-09-12T12:00:00+00:00",
+        }
+    )
+
+    assert api.doorbell_ringing is True
+    assert api.last_event["event"] == "doorbell_ringing"
+    assert api.last_event["major"] == 5
+    assert api.last_event["sub_event"] == 51
+
+
+def test_sdk_bridge_status_does_not_replace_last_event() -> None:
+    api = _api()
+    api.last_event = {"event": "face_authenticated"}
+
+    api.handle_sdk_event({"kind": "bridge_status", "status": "online"})
+
+    assert api.sdk_connected is True
+    assert api.last_event == {"event": "face_authenticated"}
 
 
 def test_unrelated_jpeg_is_not_used_as_access_picture() -> None:

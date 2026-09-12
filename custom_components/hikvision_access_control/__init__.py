@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,11 +14,16 @@ from homeassistant.const import (
     CONF_USERNAME,
     Platform,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .api import HikvisionAccessAPI, HikvisionApiError, HikvisionAuthError
-from .const import CONF_DEVICE_NAME, CONF_USE_HTTPS, CONF_VERIFY_SSL
+from .const import (
+    CONF_DEVICE_NAME,
+    CONF_USE_HTTPS,
+    CONF_VERIFY_SSL,
+    SDK_EVENT_TYPE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +41,7 @@ class HikvisionRuntimeData:
     """Runtime data stored on the config entry."""
 
     api: HikvisionAccessAPI
+    remove_sdk_listener: Callable[[], None] | None = None
 
 
 type HikvisionConfigEntry = ConfigEntry[HikvisionRuntimeData]
@@ -59,12 +66,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
     except HikvisionApiError as err:
         raise ConfigEntryNotReady(str(err)) from err
 
+    @callback
+    def handle_sdk_event(event: Event) -> None:
+        event_host = str(event.data.get("device_host") or "").strip()
+        if event_host != api.host:
+            return
+        api.handle_sdk_event(dict(event.data))
+
     entry.runtime_data = HikvisionRuntimeData(api)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    api.start(hass.loop)
-    _LOGGER.info(
-        "Hikvision Access Control setup completed for %s", api.device_name
+    entry.runtime_data.remove_sdk_listener = hass.bus.async_listen(
+        SDK_EVENT_TYPE, handle_sdk_event
     )
+    api.start(hass.loop)
+    _LOGGER.info("Hikvision Access Control setup completed for %s", api.device_name)
     return True
 
 
@@ -72,6 +87,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) -
     """Unload a config entry."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        if entry.runtime_data.remove_sdk_listener is not None:
+            entry.runtime_data.remove_sdk_listener()
+            entry.runtime_data.remove_sdk_listener = None
         await hass.async_add_executor_job(entry.runtime_data.api.stop)
         _LOGGER.info(
             "Hikvision Access Control unloaded for %s",

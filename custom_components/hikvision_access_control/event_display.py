@@ -8,6 +8,7 @@ from typing import Any
 UNKNOWN_EVENT_LABELS = {
     "unknown_access_event": "Unknown access event",
     "unknown_isapi_event": "Unknown ISAPI event",
+    "unknown_sdk_event": "Unknown SDK event",
 }
 
 
@@ -22,6 +23,10 @@ def event_display_type(
         return event_code
     if event_code == "unknown_isapi_event":
         detail = str(event.get("raw_event_type") or "unknown")
+    elif event_code == "unknown_sdk_event":
+        detail = str(
+            event.get("sdk_command_hex") or event.get("sdk_command") or "unknown"
+        )
     else:
         major = event.get("major")
         sub_event = event.get("sub_event")

@@ -2,8 +2,9 @@
 
 Integração comunitária para controlar e acompanhar localmente terminais de acesso
 Hikvision pelo protocolo HTTPS/ISAPI. A comunicação ocorre diretamente entre o
-Home Assistant e o equipamento na rede local; não usa nuvem, MQTT nem o SDK da
-porta 8000.
+Home Assistant e o equipamento na rede local; não usa nuvem nem MQTT. Um add-on
+opcional e isolado recebe os callbacks HCNetSDK da porta 8000 para firmwares que
+não publicam a chamada no `alertStream`.
 
 > Esta é uma integração independente e não oficial. Ela não é desenvolvida,
 > homologada nem suportada pela Hikvision.
@@ -20,6 +21,10 @@ porta 8000.
 O preparo desta versão não incluiu acesso a um equipamento físico. Portanto, a
 versão publicada deve ser validada no DS-K1T344MX-E1 real antes de ser considerada
 homologada para produção. Outros modelos e firmwares não estão confirmados.
+
+O uso da ponte SDK foi preparado para o firmware do DS-K1T344 que anuncia
+**SDK Server** na porta 8000. Como o HCNetSDK é proprietário, o repositório não
+inclui nem redistribui as bibliotecas da Hikvision.
 
 ## Funcionalidades e entidades
 
@@ -38,6 +43,8 @@ dispositivo no Home Assistant.
 | Sensor | Último evento | Tipo e metadados do último evento recebido |
 | Sensor | Conexão ISAPI | Estado `online`/`offline` do `alertStream` |
 | Binary sensor | Relé de abertura | Último estado lógico de travamento/destravamento |
+| Binary sensor | Campainha tocando | Liga por callback SDK/ISAPI e desliga pelo estado final ou timeout local |
+| Sensor | Conexão da ponte SDK | Estado `online`/`offline` do add-on HCNetSDK opcional |
 | Camera | Foto do último acesso | Última parte `Picture` ligada a um acesso, sem substituir pela imagem térmica |
 | Camera | Foto do último visitante | Foto ligada ao último toque da campainha, usando o anexo do evento ou um snapshot |
 
@@ -115,6 +122,63 @@ do HACS para funcionar como repositório personalizado.
 2. Copie a pasta `custom_components/hikvision_access_control` para
    `/config/custom_components/hikvision_access_control`.
 3. Reinicie o Home Assistant.
+
+## Campainha sem polling pela porta 8000
+
+A integração aceita eventos do add-on **Hikvision SDK Bridge**. O add-on faz um
+login persistente na porta 8000, registra o callback global do HCNetSDK e arma o
+canal de alarmes. Não consulta repetidamente o estado do terminal.
+
+1. Baixe o **Device Network SDK para Linux** no
+   [site oficial da Hikvision](https://pro-av.hikvision.com/us-en/support/download/sdk/)
+   para a mesma arquitetura do Home Assistant.
+2. Copie `libhcnetsdk.so` e todas as dependências da mesma distribuição para
+   `/share/hikvision_sdk/lib`. Preserve a subpasta `HCNetSDKCom`.
+3. Em **Configurações → Complementos → Loja de complementos → Repositórios**,
+   adicione `https://github.com/Titosoft/hikvision-access-control`.
+4. Instale **Hikvision SDK Bridge** e configure o IP do mesmo terminal usado na
+   integração, porta `8000`, usuário local, senha e o caminho da biblioteca.
+5. Inicie o add-on. O log deve mostrar `HCNetSDK alarm channel armed` e a entidade
+   **Conexão da ponte SDK** deve ficar `Online`.
+
+Não misture bibliotecas `amd64`, `aarch64` ou `armv7`. No Raspberry Pi, confirme
+que o pacote oficial escolhido contém binários para a arquitetura exata do
+sistema. O add-on usa uma base Debian/glibc compatível com o runtime Linux da
+Hikvision. A ponte roda em processo separado para que uma falha numa biblioteca
+nativa não encerre o Home Assistant Core.
+
+O callback `COMM_ALARM_BUTTON_DOWN_EXCEPTION` (`0x1152`) liga imediatamente o
+binary sensor **Campainha tocando**. Eventos `changedCallStatus` recebidos como
+`COMM_ISAPI_ALARM` (`0x6009`) ou `COMM_VCA_ALARM` (`0x4993`) desligam o sensor
+quando a chamada sai do estado de toque. Se o firmware não publicar o estado
+final, um temporizador local de 45 segundos faz o desligamento; esse temporizador
+não acessa o equipamento.
+
+A ponte repete apenas seu estado local de conexão a cada 60 segundos para se
+ressincronizar após reinícios do Home Assistant. Esse heartbeat não consulta o
+terminal e não participa da detecção da campainha.
+
+Como fallback para terminais de controle de acesso, a ponte também reconhece os
+eventos de campainha `(5, 37)` e chamada à central `(5, 51)` dentro de
+`COMM_ALARM_ACS` (`0x5002`). O callback V31 confirma o recebimento ao equipamento,
+como exigido pelo HCNetSDK para essa classe de alarme.
+
+Exemplo de automação usando a nova entidade:
+
+```yaml
+alias: Campainha do portão tocou
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.portao_social_campainha_tocando
+    from: "off"
+    to: "on"
+actions:
+  - action: notify.notify
+    data:
+      title: Portão social
+      message: A campainha foi acionada.
+mode: single
+```
 
 ## Configuração pela interface
 

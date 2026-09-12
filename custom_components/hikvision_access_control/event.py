@@ -14,7 +14,8 @@ from .entity import HikvisionAccessEntity, async_get_unknown_event_labels
 from .event_display import event_display_type
 
 EVENT_TYPES = sorted(
-    set(EVENT_LABELS.values()) | {"unknown_access_event", "unknown_isapi_event"}
+    set(EVENT_LABELS.values())
+    | {"unknown_access_event", "unknown_isapi_event", "unknown_sdk_event"}
 )
 
 
@@ -40,6 +41,10 @@ class HikvisionAccessEvent(HikvisionAccessEntity, EventEntity):
         self._attr_event_types = list(EVENT_TYPES)
         self._last_event: dict[str, Any] | None = None
         self._attr_translation_key = "access_event"
+
+    @property
+    def available(self) -> bool:
+        return self.api.available or self.api.sdk_connected is True
 
     def _handle_api_update(self) -> None:
         event = self.api.last_event

@@ -16,7 +16,8 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up relay status."""
-    async_add_entities([HikvisionRelaySensor(entry.runtime_data.api)])
+    api = entry.runtime_data.api
+    async_add_entities([HikvisionRelaySensor(api), HikvisionDoorbellSensor(api)])
 
 
 class HikvisionRelaySensor(HikvisionAccessEntity, BinarySensorEntity):
@@ -34,3 +35,24 @@ class HikvisionRelaySensor(HikvisionAccessEntity, BinarySensorEntity):
     @property
     def icon(self) -> str:
         return "mdi:lock-open-variant" if self.is_on else "mdi:lock"
+
+
+class HikvisionDoorbellSensor(HikvisionAccessEntity, BinarySensorEntity):
+    """Represent the live doorbell ringing state from push events."""
+
+    _attr_translation_key = "doorbell_ringing"
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "doorbell_ringing")
+
+    @property
+    def available(self) -> bool:
+        return self.api.available or self.api.sdk_connected is True
+
+    @property
+    def is_on(self) -> bool:
+        return self.api.doorbell_ringing
+
+    @property
+    def icon(self) -> str:
+        return "mdi:bell-ring" if self.is_on else "mdi:bell-outline"

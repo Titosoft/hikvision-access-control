@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Optional isolated Home Assistant add-on that logs in through HCNetSDK port 8000,
+  arms a persistent alarm channel, and forwards intercom callbacks without polling.
+- `Campainha tocando` binary sensor driven by SDK button/call events, with explicit
+  call-state clearing and a local 45-second safety timeout.
+- Diagnostic SDK bridge connection sensor and raw SDK command metadata for
+  previously unknown intercom callbacks.
+
 ## [0.1.8] - 2026-09-11
 
 ### Added

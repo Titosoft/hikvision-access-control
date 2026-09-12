@@ -53,6 +53,7 @@
   },
   "entity": {
     "binary_sensor": {
+      "doorbell_ringing": {"name": "Campainha tocando"},
       "relay_unlocked": {"name": "Relé de abertura"}
     },
     "button": {
@@ -109,7 +110,8 @@
               "security_module_tamper_alarm": "Alarme de violação do módulo de segurança",
               "security_module_tamper_restored": "Violação do módulo de segurança restaurada",
               "unknown_access_event": "Evento de acesso desconhecido",
-              "unknown_isapi_event": "Evento ISAPI desconhecido"
+              "unknown_isapi_event": "Evento ISAPI desconhecido",
+              "unknown_sdk_event": "Evento SDK desconhecido"
             }
           }
         }
@@ -119,6 +121,10 @@
       "connection": {
         "name": "Conexão ISAPI",
         "state": {"offline": "Offline", "online": "Online"}
+      },
+      "sdk_connection": {
+        "name": "Conexão da ponte SDK",
+        "state": {"offline": "Offline", "online": "Online", "unknown": "Desconhecida"}
       },
       "employee_id": {"name": "Matrícula do último usuário"},
       "last_access_time": {"name": "Horário do último acesso"},
@@ -166,7 +172,8 @@
           "security_module_tamper_alarm": "Alarme de violação do módulo de segurança",
           "security_module_tamper_restored": "Violação do módulo de segurança restaurada",
           "unknown_access_event": "Evento de acesso desconhecido",
-          "unknown_isapi_event": "Evento ISAPI desconhecido"
+          "unknown_isapi_event": "Evento ISAPI desconhecido",
+          "unknown_sdk_event": "Evento SDK desconhecido"
         }
       },
       "last_result": {
