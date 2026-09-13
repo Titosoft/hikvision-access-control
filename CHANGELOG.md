@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-13
+
 ### Changed
 
 - Move the call-status polling interval into the initial setup and reconfigure
