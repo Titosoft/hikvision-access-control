@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Use a fresh HTTP Digest handshake for each call-status request, matching the
+  working `curl --digest` behavior and avoiding stale authentication nonces on
+  affected Hikvision firmware.
+- Keep retrying the ISAPI event stream after a runtime authentication rejection
+  instead of leaving it permanently offline until the next reload.
+
 ## [0.1.13] - 2026-09-13
 
 ### Changed

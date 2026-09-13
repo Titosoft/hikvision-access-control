@@ -31,6 +31,7 @@ DOORBELL_RING_TIMEOUT_SECONDS = 45
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
 CALL_STATUS_RETRY_MAX_SECONDS = 30
 BACKGROUND_STOP_TIMEOUT_SECONDS = 5
+CALL_STATUS_REQUEST_TIMEOUT = (2, 2)
 CALL_STATUS_PATH = "/ISAPI/VideoIntercom/callStatus?format=json"
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
 LOG_REDACTED = "**REDACTED**"
@@ -153,7 +154,6 @@ class HikvisionAccessAPI:
         self._thread: threading.Thread | None = None
         self._call_status_thread: threading.Thread | None = None
         self._session: requests.Session | None = None
-        self._call_status_session: requests.Session | None = None
         self._response: requests.Response | None = None
         self._stream_lock = threading.Lock()
 
@@ -273,8 +273,7 @@ class HikvisionAccessAPI:
         with self._stream_lock:
             response = self._response
             session = self._session
-            call_status_session = self._call_status_session
-        for resource in (response, session, call_status_session):
+        for resource in (response, session):
             if resource is None:
                 continue
             try:
@@ -365,7 +364,7 @@ class HikvisionAccessAPI:
             "GET",
             CALL_STATUS_PATH,
             session=session,
-            timeout=10,
+            timeout=CALL_STATUS_REQUEST_TIMEOUT,
             headers={"Accept": "application/json, application/xml"},
         )
         content = response.content.lstrip()
@@ -403,71 +402,63 @@ class HikvisionAccessAPI:
     def _poll_call_status_forever(self) -> None:
         """Poll callStatus and process state transitions without using HCNetSDK."""
         delay = self.call_status_poll_interval
-        session = requests.Session()
-        session.auth = HTTPDigestAuth(self.username, self.password)
-        with self._stream_lock:
-            self._call_status_session = session
-        try:
-            while not self._stop.is_set():
-                try:
-                    status = self._get_call_status(session)
-                    if self._stop.is_set():
-                        break
-                except HikvisionAuthError:
-                    if self.call_status_poll_available is not False:
-                        _LOGGER.error(
-                            "Authentication failed while polling Hikvision call "
-                            "status for %s",
-                            self.host,
-                        )
-                    self._set_call_status_poll_state(False, "invalid_auth")
-                    delay = max(
-                        CALL_STATUS_RETRY_MAX_SECONDS,
-                        self.call_status_poll_interval,
-                    )
-                except (HikvisionApiError, requests.RequestException, OSError) as err:
-                    if self.call_status_poll_available is not False:
-                        _LOGGER.warning(
-                            "Hikvision call-status polling for %s failed: %s",
-                            self.host,
-                            err,
-                        )
-                    self._set_call_status_poll_state(
-                        False, self._call_status_poll_error_code(err)
-                    )
-                    delay = min(
-                        max(delay * 2, self.call_status_poll_interval),
-                        max(
-                            CALL_STATUS_RETRY_MAX_SECONDS,
-                            self.call_status_poll_interval,
-                        ),
-                    )
-                except Exception:  # noqa: BLE001 - keep the polling worker alive
-                    _LOGGER.exception(
-                        "Unexpected Hikvision call-status polling error for %s",
+        while not self._stop.is_set():
+            try:
+                # A fresh Digest handshake matches curl and avoids stale nonces on
+                # Hikvision firmware that rejects a long-lived authenticated session.
+                status = self._get_call_status()
+                if self._stop.is_set():
+                    break
+            except HikvisionAuthError:
+                if self.call_status_poll_available is not False:
+                    _LOGGER.error(
+                        "Authentication failed while polling Hikvision call "
+                        "status for %s",
                         self.host,
                     )
-                    self._set_call_status_poll_state(False, "internal_error")
-                    delay = max(
+                self._set_call_status_poll_state(False, "invalid_auth")
+                delay = max(
+                    CALL_STATUS_RETRY_MAX_SECONDS,
+                    self.call_status_poll_interval,
+                )
+            except (HikvisionApiError, requests.RequestException, OSError) as err:
+                if self.call_status_poll_available is not False:
+                    _LOGGER.warning(
+                        "Hikvision call-status polling for %s failed: %s",
+                        self.host,
+                        err,
+                    )
+                self._set_call_status_poll_state(
+                    False, self._call_status_poll_error_code(err)
+                )
+                delay = min(
+                    max(delay * 2, self.call_status_poll_interval),
+                    max(
                         CALL_STATUS_RETRY_MAX_SECONDS,
                         self.call_status_poll_interval,
+                    ),
+                )
+            except Exception:  # noqa: BLE001 - keep the polling worker alive
+                _LOGGER.exception(
+                    "Unexpected Hikvision call-status polling error for %s",
+                    self.host,
+                )
+                self._set_call_status_poll_state(False, "internal_error")
+                delay = max(
+                    CALL_STATUS_RETRY_MAX_SECONDS,
+                    self.call_status_poll_interval,
+                )
+            else:
+                if self.call_status_poll_available is not True:
+                    _LOGGER.info(
+                        "Hikvision call-status polling for %s connected",
+                        self.host,
                     )
-                else:
-                    if self.call_status_poll_available is not True:
-                        _LOGGER.info(
-                            "Hikvision call-status polling for %s connected",
-                            self.host,
-                        )
-                    self._set_call_status_poll_state(True)
-                    delay = self.call_status_poll_interval
-                    self._handle_polled_call_status(status)
-                if self._stop.wait(delay):
-                    break
-        finally:
-            session.close()
-            with self._stream_lock:
-                if self._call_status_session is session:
-                    self._call_status_session = None
+                self._set_call_status_poll_state(True)
+                delay = self.call_status_poll_interval
+                self._handle_polled_call_status(status)
+            if self._stop.wait(delay):
+                break
 
     def _handle_polled_call_status(self, status: str) -> None:
         """Turn a changed polled status into the existing call event format."""
@@ -528,11 +519,14 @@ class HikvisionAccessAPI:
                     break
                 raise HikvisionApiError("Event stream ended unexpectedly")
             except HikvisionAuthError:
-                _LOGGER.error(
-                    "Authentication failed for Hikvision terminal %s", self.host
-                )
-                self._set_available(False)
-                return
+                if not self._stop.is_set():
+                    _LOGGER.error(
+                        "Authentication failed for Hikvision event stream %s; "
+                        "retrying in %s seconds",
+                        self.host,
+                        delay,
+                    )
+                    self._set_available(False)
             except (HikvisionApiError, requests.RequestException, OSError) as err:
                 was_connected = self.available
                 if not self._stop.is_set():

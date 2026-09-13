@@ -847,7 +847,7 @@ def test_call_status_poll_uses_digest_isapi_and_parses_json(monkeypatch) -> None
     assert captured[0]["method"] == "GET"
     assert captured[0]["url"].endswith("/ISAPI/VideoIntercom/callStatus?format=json")
     assert isinstance(captured[0]["auth"], HTTPDigestAuth)
-    assert captured[0]["timeout"] == 10
+    assert captured[0]["timeout"] == API_MODULE.CALL_STATUS_REQUEST_TIMEOUT
 
 
 def test_call_status_poll_accepts_xml_response(monkeypatch) -> None:
@@ -889,7 +889,7 @@ def test_call_status_poll_uses_configured_interval() -> None:
             return True
 
     api._stop = StopAfterFirstWait()
-    api._get_call_status = lambda session: "idle"
+    api._get_call_status = lambda: "idle"
 
     api._poll_call_status_forever()
 
@@ -897,7 +897,6 @@ def test_call_status_poll_uses_configured_interval() -> None:
     assert api.call_status == "idle"
     assert api.call_status_poll_available is True
     assert api.call_status_poll_error is None
-    assert api._call_status_session is None
 
 
 def test_call_status_poll_exposes_safe_error_code() -> None:
@@ -912,7 +911,7 @@ def test_call_status_poll_exposes_safe_error_code() -> None:
             waits.append(delay)
             return True
 
-    def fail_call_status(session) -> str:
+    def fail_call_status() -> str:
         raise HikvisionApiError("ISAPI returned HTTP 404", http_status=404)
 
     api._stop = StopAfterFirstWait()
@@ -937,7 +936,7 @@ def test_call_status_poll_retries_after_unexpected_error() -> None:
             waits.append(delay)
             return True
 
-    def fail_call_status(session) -> str:
+    def fail_call_status() -> str:
         raise ValueError("synthetic unexpected failure")
 
     api._stop = StopAfterFirstWait()
@@ -1018,6 +1017,38 @@ def test_stream_reconnects_after_disconnect() -> None:
         if calls == 1:
             raise HikvisionApiError("synthetic disconnect")
         stop.set()
+
+    api._consume_stream = consume
+    api._stream_forever()
+
+    assert calls == 2
+    assert waits == [2]
+
+
+def test_stream_retries_after_runtime_authentication_rejection() -> None:
+    api = _api()
+    calls = 0
+    waits: list[float] = []
+
+    class FastStop:
+        stopped = False
+
+        def is_set(self) -> bool:
+            return self.stopped
+
+        def wait(self, delay: float) -> bool:
+            waits.append(delay)
+            return self.stopped
+
+    stop = FastStop()
+    api._stop = stop
+
+    def consume() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise HikvisionAuthError("synthetic authentication rejection")
+        stop.stopped = True
 
     api._consume_stream = consume
     api._stream_forever()
