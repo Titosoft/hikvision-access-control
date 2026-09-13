@@ -12,7 +12,11 @@
           "username": "Usuário",
           "password": "Senha",
           "use_https": "Usar HTTPS",
-          "verify_ssl": "Verificar certificado HTTPS"
+          "verify_ssl": "Verificar certificado HTTPS",
+          "call_status_poll_interval": "Intervalo de consulta da campainha (segundos)"
+        },
+        "data_description": {
+          "call_status_poll_interval": "Faixa permitida: 1 a 60 segundos. Intervalos maiores reduzem as requisições, mas podem perder um toque curto."
         }
       },
       "reconfigure": {
@@ -25,10 +29,12 @@
           "username": "Usuário",
           "password": "Senha",
           "use_https": "Usar HTTPS",
-          "verify_ssl": "Verificar certificado HTTPS"
+          "verify_ssl": "Verificar certificado HTTPS",
+          "call_status_poll_interval": "Intervalo de consulta da campainha (segundos)"
         },
         "data_description": {
-          "password": "Deixe em branco para manter a senha atual."
+          "password": "Deixe em branco para manter a senha atual.",
+          "call_status_poll_interval": "Faixa permitida: 1 a 60 segundos. Intervalos maiores reduzem as requisições, mas podem perder um toque curto."
         }
       },
       "reauth_confirm": {
@@ -49,20 +55,6 @@
       "reauth_successful": "A reautenticação foi concluída.",
       "reconfigure_successful": "A reconfiguração foi concluída.",
       "unique_id_mismatch": "As configurações identificam outro terminal."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Configurar consulta da campainha",
-        "description": "Escolha com que frequência a integração consulta o estado da chamada do interfone.",
-        "data": {
-          "call_status_poll_interval": "Intervalo de consulta (segundos)"
-        },
-        "data_description": {
-          "call_status_poll_interval": "Faixa permitida: 1 a 60 segundos. Intervalos maiores reduzem as requisições, mas podem perder um toque curto."
-        }
-      }
     }
   },
   "entity": {

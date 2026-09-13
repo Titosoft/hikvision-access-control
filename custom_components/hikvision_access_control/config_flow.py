@@ -7,11 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlowResult,
-    OptionsFlowWithReload,
-)
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import callback
 
@@ -34,14 +30,6 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
     """Handle a config flow for a Hikvision access-control terminal."""
 
     VERSION = 1
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(
-        config_entry: ConfigEntry,
-    ) -> HikvisionAccessControlOptionsFlow:
-        """Return the options flow for polling settings."""
-        return HikvisionAccessControlOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -92,7 +80,7 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self._schema(
-                user_input or dict(entry.data), require_password=False
+                user_input or {**entry.options, **entry.data}, require_password=False
             ),
             errors=errors,
         )
@@ -151,6 +139,10 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
             use_https=data[CONF_USE_HTTPS],
             verify_ssl=data[CONF_VERIFY_SSL],
             configured_name=data[CONF_DEVICE_NAME],
+            call_status_poll_interval=data.get(
+                CONF_CALL_STATUS_POLL_INTERVAL,
+                DEFAULT_CALL_STATUS_POLL_INTERVAL,
+            ),
         )
         try:
             await self.hass.async_add_executor_job(api.get_device_info)
@@ -202,37 +194,18 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
                 vol.Required(
                     CONF_VERIFY_SSL, default=defaults.get(CONF_VERIFY_SSL, False)
                 ): bool,
-            }
-        )
-
-
-class HikvisionAccessControlOptionsFlow(OptionsFlowWithReload):
-    """Configure runtime options for a Hikvision terminal."""
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Configure the call-status polling interval."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
+                vol.Required(
+                    CONF_CALL_STATUS_POLL_INTERVAL,
+                    default=defaults.get(
                         CONF_CALL_STATUS_POLL_INTERVAL,
-                        default=self.config_entry.options.get(
-                            CONF_CALL_STATUS_POLL_INTERVAL,
-                            DEFAULT_CALL_STATUS_POLL_INTERVAL,
-                        ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=MIN_CALL_STATUS_POLL_INTERVAL,
-                            max=MAX_CALL_STATUS_POLL_INTERVAL,
-                        ),
-                    )
-                }
-            ),
+                        DEFAULT_CALL_STATUS_POLL_INTERVAL,
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_CALL_STATUS_POLL_INTERVAL,
+                        max=MAX_CALL_STATUS_POLL_INTERVAL,
+                    ),
+                ),
+            }
         )

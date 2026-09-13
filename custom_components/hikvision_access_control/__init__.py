@@ -57,9 +57,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
         use_https=data[CONF_USE_HTTPS],
         verify_ssl=data[CONF_VERIFY_SSL],
         configured_name=data[CONF_DEVICE_NAME],
-        call_status_poll_interval=entry.options.get(
+        call_status_poll_interval=data.get(
             CONF_CALL_STATUS_POLL_INTERVAL,
-            DEFAULT_CALL_STATUS_POLL_INTERVAL,
+            entry.options.get(
+                CONF_CALL_STATUS_POLL_INTERVAL,
+                DEFAULT_CALL_STATUS_POLL_INTERVAL,
+            ),
         ),
     )
     try:
@@ -78,9 +81,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
 
 async def async_unload_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) -> bool:
     """Unload a config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded:
+    try:
+        unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    finally:
         await hass.async_add_executor_job(entry.runtime_data.api.stop)
+    if unloaded:
         _LOGGER.info(
             "Hikvision Access Control unloaded for %s",
             entry.runtime_data.api.device_name,

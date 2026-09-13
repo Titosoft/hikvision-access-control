@@ -845,9 +845,7 @@ def test_call_status_poll_uses_digest_isapi_and_parses_json(monkeypatch) -> None
 
     assert api._get_call_status() == "ring"
     assert captured[0]["method"] == "GET"
-    assert captured[0]["url"].endswith(
-        "/ISAPI/VideoIntercom/callStatus?format=json"
-    )
+    assert captured[0]["url"].endswith("/ISAPI/VideoIntercom/callStatus?format=json")
     assert isinstance(captured[0]["auth"], HTTPDigestAuth)
     assert captured[0]["timeout"] == 10
 
@@ -925,6 +923,31 @@ def test_call_status_poll_exposes_safe_error_code() -> None:
     assert waits == [4]
     assert api.call_status_poll_available is False
     assert api.call_status_poll_error == "http_404"
+
+
+def test_call_status_poll_retries_after_unexpected_error() -> None:
+    api = _api()
+    waits: list[float] = []
+
+    class StopAfterFirstWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, delay: float) -> bool:
+            waits.append(delay)
+            return True
+
+    def fail_call_status(session) -> str:
+        raise ValueError("synthetic unexpected failure")
+
+    api._stop = StopAfterFirstWait()
+    api._get_call_status = fail_call_status
+
+    api._poll_call_status_forever()
+
+    assert waits == [API_MODULE.CALL_STATUS_RETRY_MAX_SECONDS]
+    assert api.call_status_poll_available is False
+    assert api.call_status_poll_error == "internal_error"
 
 
 def test_polled_call_status_emits_only_on_transitions(monkeypatch) -> None:
@@ -1016,6 +1039,40 @@ def test_stop_closes_active_stream_resources() -> None:
     assert response.closed is True
     assert session.closed is True
     assert api.available is False
+
+
+def test_stop_ignores_resource_close_error() -> None:
+    api = _api()
+
+    class BrokenResource:
+        def close(self) -> None:
+            raise RuntimeError("synthetic close failure")
+
+    api._response = BrokenResource()
+
+    api.stop()
+
+    assert api.available is False
+
+
+def test_stop_has_one_bounded_deadline_for_all_workers(monkeypatch) -> None:
+    api = _api()
+    timeouts: list[float] = []
+
+    class StuckThread:
+        def is_alive(self) -> bool:
+            return True
+
+        def join(self, timeout: float) -> None:
+            timeouts.append(timeout)
+
+    monkeypatch.setattr(API_MODULE, "BACKGROUND_STOP_TIMEOUT_SECONDS", 0)
+    api._thread = StuckThread()
+    api._call_status_thread = StuckThread()
+
+    api.stop()
+
+    assert timeouts == [0, 0]
 
 
 def test_started_stream_thread_stops_cleanly() -> None:

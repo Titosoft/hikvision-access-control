@@ -30,6 +30,7 @@ DOORBELL_DEDUPLICATION_SECONDS = 5
 DOORBELL_RING_TIMEOUT_SECONDS = 45
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
 CALL_STATUS_RETRY_MAX_SECONDS = 30
+BACKGROUND_STOP_TIMEOUT_SECONDS = 5
 CALL_STATUS_PATH = "/ISAPI/VideoIntercom/callStatus?format=json"
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
 LOG_REDACTED = "**REDACTED**"
@@ -273,23 +274,35 @@ class HikvisionAccessAPI:
             response = self._response
             session = self._session
             call_status_session = self._call_status_session
-        if response is not None:
-            response.close()
-        if session is not None:
-            session.close()
-        if call_status_session is not None:
-            call_status_session.close()
+        for resource in (response, session, call_status_session):
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except Exception:  # noqa: BLE001 - cleanup must not block entry removal
+                _LOGGER.debug(
+                    "Ignored an error while closing Hikvision resources for %s",
+                    self.host,
+                    exc_info=True,
+                )
+        deadline = time.monotonic() + BACKGROUND_STOP_TIMEOUT_SECONDS
         for thread in (self._thread, self._call_status_thread):
             if (
                 thread
                 and thread.is_alive()
                 and thread is not threading.current_thread()
             ):
-                thread.join(timeout=15)
+                thread.join(timeout=max(0, deadline - time.monotonic()))
         if self._thread is None or not self._thread.is_alive():
             self._thread = None
         if self._call_status_thread is None or not self._call_status_thread.is_alive():
             self._call_status_thread = None
+        if self._thread is not None or self._call_status_thread is not None:
+            _LOGGER.warning(
+                "Hikvision background workers for %s did not stop within %s seconds",
+                self.host,
+                BACKGROUND_STOP_TIMEOUT_SECONDS,
+            )
         self._set_available(False)
         self._set_call_status_poll_state(False)
         _LOGGER.debug("Hikvision event stream for %s stopped", self.host)
@@ -398,6 +411,8 @@ class HikvisionAccessAPI:
             while not self._stop.is_set():
                 try:
                     status = self._get_call_status(session)
+                    if self._stop.is_set():
+                        break
                 except HikvisionAuthError:
                     if self.call_status_poll_available is not False:
                         _LOGGER.error(
@@ -426,6 +441,16 @@ class HikvisionAccessAPI:
                             CALL_STATUS_RETRY_MAX_SECONDS,
                             self.call_status_poll_interval,
                         ),
+                    )
+                except Exception:  # noqa: BLE001 - keep the polling worker alive
+                    _LOGGER.exception(
+                        "Unexpected Hikvision call-status polling error for %s",
+                        self.host,
+                    )
+                    self._set_call_status_poll_state(False, "internal_error")
+                    delay = max(
+                        CALL_STATUS_RETRY_MAX_SECONDS,
+                        self.call_status_poll_interval,
                     )
                 else:
                     if self.call_status_poll_available is not True:
@@ -461,9 +486,7 @@ class HikvisionAccessAPI:
                 "eventType": "changedCallStatus",
                 "eventState": "active",
                 "dateTime": datetime.now().astimezone().isoformat(),
-                "ChangedCallStatus": {
-                    "CallStatus": {"status": status, "cmd": "poll"}
-                },
+                "ChangedCallStatus": {"CallStatus": {"status": status, "cmd": "poll"}},
             }
         )
 

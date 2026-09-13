@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Move the call-status polling interval into the initial setup and reconfigure
+  forms so connection settings and polling can be managed together. Existing
+  intervals saved by 0.1.12 remain supported.
+
+### Fixed
+
+- Bound background-worker shutdown to five seconds and tolerate resource cleanup
+  errors so a stalled ISAPI request cannot prevent unloading or deleting the
+  integration.
+- Keep the call-status worker alive after an unexpected polling exception and
+  expose `internal_error` while it retries.
+- Keep entities available when call-status polling confirms the terminal is
+  reachable, even if the continuous event stream is disconnected.
+
 ## [0.1.12] - 2026-09-13
 
 ### Added

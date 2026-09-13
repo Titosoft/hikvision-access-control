@@ -198,3 +198,22 @@ def test_doorbell_is_available_until_polling_actually_fails(display_modules):
         "polling_available": False,
         "polling_error": "http_403",
     }
+
+
+def test_entities_remain_available_when_call_status_confirms_device(display_modules):
+    api = display_modules.api.HikvisionAccessAPI(
+        host="192.168.1.100",
+        port=443,
+        username="test",
+        password="test",
+        use_https=True,
+        verify_ssl=False,
+        configured_name="Gate",
+    )
+    entity = display_modules.entity.HikvisionAccessEntity(api, "test")
+
+    assert entity.available is False
+
+    api._set_call_status_poll_state(True)
+
+    assert entity.available is True

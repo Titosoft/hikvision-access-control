@@ -139,10 +139,10 @@ e outros eventos de acesso. Se ele também publicar a chamada, a deduplicação 
 uma segunda ocorrência. Quando o evento não traz uma imagem, a integração tenta
 obter o snapshot do canal 101.
 
-O intervalo pode ser alterado entre 1 e 60 segundos em **Configurações →
-Dispositivos e serviços → Hikvision Access Control → Configurar**. Intervalos
-maiores reduzem as requisições, mas podem perder uma chamada que toque por menos
-tempo que o intervalo escolhido.
+O intervalo pode ser definido entre 1 e 60 segundos durante a configuração inicial
+e alterado depois em **Configurações → Dispositivos e serviços → Hikvision Access
+Control → Reconfigurar**. Intervalos maiores reduzem as requisições, mas podem
+perder uma chamada que toque por menos tempo que o intervalo escolhido.
 
 Exemplo de automação usando a nova entidade:
 
@@ -166,14 +166,14 @@ mode: single
 1. Abra **Configurações → Dispositivos e serviços → Adicionar integração**.
 2. Procure por **Hikvision Access Control**.
 3. Informe o endereço do terminal, porta (normalmente `443`), usuário, senha e um
-   nome para o dispositivo.
+   nome para o dispositivo. Defina também o intervalo de consulta da campainha,
+   entre 1 e 60 segundos; o padrão é 2 segundos.
 4. Mantenha HTTPS habilitado. Para o certificado autoassinado padrão do terminal,
    desabilite **Verificar certificado HTTPS**. Habilite a verificação se o terminal
    usar um certificado confiável para o nome/endereço configurado.
 
-Depois de adicionar o terminal, use **Configurar** na entrada da integração para
-alterar o intervalo de consulta da campainha. A alteração recarrega a integração
-automaticamente.
+Depois de adicionar o terminal, use **Reconfigurar** na entrada da integração para
+alterar qualquer um desses dados, incluindo o intervalo de consulta.
 
 As credenciais ficam na entrada de configuração protegida do Home Assistant e não
 são gravadas no código, em logs de diagnóstico ou nas imagens. É possível alterar
@@ -289,7 +289,7 @@ desabilitada; eles não representam falha do fluxo de eventos.
   automaticamente, com espera progressiva de até 30 segundos após uma falha no
   intervalo padrão; intervalos configurados acima disso são respeitados.
   Nos atributos da entidade, `polling_error` informa `invalid_auth`, `http_...`,
-  `isapi_...`, `invalid_response` ou `cannot_connect` e
+  `isapi_...`, `invalid_response`, `cannot_connect` ou `internal_error` e
   `poll_interval_seconds` mostra o intervalo em uso.
 - **Evento aparece como “Desconhecido”:** uma entidade `event` recém-criada fica
   nesse estado até receber o primeiro evento; depois confira o atributo

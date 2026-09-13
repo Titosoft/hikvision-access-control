@@ -12,7 +12,11 @@
           "username": "Username",
           "password": "Password",
           "use_https": "Use HTTPS",
-          "verify_ssl": "Verify HTTPS certificate"
+          "verify_ssl": "Verify HTTPS certificate",
+          "call_status_poll_interval": "Doorbell polling interval (seconds)"
+        },
+        "data_description": {
+          "call_status_poll_interval": "Allowed range: 1 to 60 seconds. Longer intervals reduce requests but can miss a short ring."
         }
       },
       "reconfigure": {
@@ -25,10 +29,12 @@
           "username": "Username",
           "password": "Password",
           "use_https": "Use HTTPS",
-          "verify_ssl": "Verify HTTPS certificate"
+          "verify_ssl": "Verify HTTPS certificate",
+          "call_status_poll_interval": "Doorbell polling interval (seconds)"
         },
         "data_description": {
-          "password": "Leave blank to keep the current password."
+          "password": "Leave blank to keep the current password.",
+          "call_status_poll_interval": "Allowed range: 1 to 60 seconds. Longer intervals reduce requests but can miss a short ring."
         }
       },
       "reauth_confirm": {
@@ -49,20 +55,6 @@
       "reauth_successful": "Reauthentication was successful.",
       "reconfigure_successful": "Reconfiguration was successful.",
       "unique_id_mismatch": "The settings identify a different terminal."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Configure doorbell polling",
-        "description": "Choose how often the integration checks the intercom call status.",
-        "data": {
-          "call_status_poll_interval": "Polling interval (seconds)"
-        },
-        "data_description": {
-          "call_status_poll_interval": "Allowed range: 1 to 60 seconds. Longer intervals reduce requests but can miss a short ring."
-        }
-      }
     }
   },
   "entity": {

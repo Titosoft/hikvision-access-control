@@ -48,8 +48,8 @@ class HikvisionAccessEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Return stream availability."""
-        return self.api.available
+        """Return whether an ISAPI channel confirms the terminal is reachable."""
+        return self.api.available or self.api.call_status_poll_available is True
 
     async def async_added_to_hass(self) -> None:
         """Register for API updates."""
