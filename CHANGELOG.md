@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-09-13
+
 ### Fixed
 
 - Use a fresh HTTP Digest handshake for each call-status request, matching the
