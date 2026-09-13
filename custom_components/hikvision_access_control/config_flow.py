@@ -7,18 +7,26 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import callback
 
 from .api import HikvisionAccessAPI, HikvisionApiError, HikvisionAuthError
 from .const import (
+    CONF_CALL_STATUS_POLL_INTERVAL,
     CONF_DEVICE_NAME,
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
+    DEFAULT_CALL_STATUS_POLL_INTERVAL,
     DEFAULT_NAME,
     DEFAULT_PORT,
     DOMAIN,
+    MAX_CALL_STATUS_POLL_INTERVAL,
+    MIN_CALL_STATUS_POLL_INTERVAL,
 )
 
 
@@ -26,6 +34,14 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
     """Handle a config flow for a Hikvision access-control terminal."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> HikvisionAccessControlOptionsFlow:
+        """Return the options flow for polling settings."""
+        return HikvisionAccessControlOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -187,4 +203,36 @@ class HikvisionAccessControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN)
                     CONF_VERIFY_SSL, default=defaults.get(CONF_VERIFY_SSL, False)
                 ): bool,
             }
+        )
+
+
+class HikvisionAccessControlOptionsFlow(OptionsFlowWithReload):
+    """Configure runtime options for a Hikvision terminal."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure the call-status polling interval."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_CALL_STATUS_POLL_INTERVAL,
+                        default=self.config_entry.options.get(
+                            CONF_CALL_STATUS_POLL_INTERVAL,
+                            DEFAULT_CALL_STATUS_POLL_INTERVAL,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=MIN_CALL_STATUS_POLL_INTERVAL,
+                            max=MAX_CALL_STATUS_POLL_INTERVAL,
+                        ),
+                    )
+                }
+            ),
         )

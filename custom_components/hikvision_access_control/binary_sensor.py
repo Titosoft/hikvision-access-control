@@ -47,11 +47,20 @@ class HikvisionDoorbellSensor(HikvisionAccessEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.api.call_status_poll_available is True
+        return self.api.call_status_poll_available is not False
 
     @property
     def is_on(self) -> bool:
         return self.api.doorbell_ringing
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {
+            "call_status": self.api.call_status,
+            "poll_interval_seconds": self.api.call_status_poll_interval,
+            "polling_available": self.api.call_status_poll_available,
+            "polling_error": self.api.call_status_poll_error,
+        }
 
     @property
     def icon(self) -> str:

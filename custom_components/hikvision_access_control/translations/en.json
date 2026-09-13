@@ -51,6 +51,20 @@
       "unique_id_mismatch": "The settings identify a different terminal."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure doorbell polling",
+        "description": "Choose how often the integration checks the intercom call status.",
+        "data": {
+          "call_status_poll_interval": "Polling interval (seconds)"
+        },
+        "data_description": {
+          "call_status_poll_interval": "Allowed range: 1 to 60 seconds. Longer intervals reduce requests but can miss a short ring."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "doorbell_ringing": {"name": "Doorbell ringing"},

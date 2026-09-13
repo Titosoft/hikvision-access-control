@@ -7,9 +7,13 @@ DOMAIN = "hikvision_access_control"
 CONF_USE_HTTPS = "use_https"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_DEVICE_NAME = "device_name"
+CONF_CALL_STATUS_POLL_INTERVAL = "call_status_poll_interval"
 
 DEFAULT_NAME = "Hikvision Access Control"
 DEFAULT_PORT = 443
+DEFAULT_CALL_STATUS_POLL_INTERVAL = 2
+MIN_CALL_STATUS_POLL_INTERVAL = 1
+MAX_CALL_STATUS_POLL_INTERVAL = 60
 
 PLATFORMS = ["binary_sensor", "button", "camera", "event", "sensor"]
 

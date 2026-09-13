@@ -51,6 +51,20 @@
       "unique_id_mismatch": "As configurações identificam outro terminal."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurar consulta da campainha",
+        "description": "Escolha com que frequência a integração consulta o estado da chamada do interfone.",
+        "data": {
+          "call_status_poll_interval": "Intervalo de consulta (segundos)"
+        },
+        "data_description": {
+          "call_status_poll_interval": "Faixa permitida: 1 a 60 segundos. Intervalos maiores reduzem as requisições, mas podem perder um toque curto."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "doorbell_ringing": {"name": "Campainha tocando"},

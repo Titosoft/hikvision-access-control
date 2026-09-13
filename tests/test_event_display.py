@@ -33,6 +33,7 @@ def display_modules(monkeypatch):
     modules = {
         "homeassistant": {},
         "homeassistant.components": {},
+        "homeassistant.components.binary_sensor": {"BinarySensorEntity": Entity},
         "homeassistant.components.event": {"EventEntity": EventEntity},
         "homeassistant.components.sensor": {
             "SensorEntity": Entity,
@@ -75,7 +76,16 @@ def display_modules(monkeypatch):
     package.HikvisionConfigEntry = object
     monkeypatch.setitem(sys.modules, package_name, package)
     loaded = {}
-    names = ("const", "parser", "api", "event_display", "entity", "event", "sensor")
+    names = (
+        "const",
+        "parser",
+        "api",
+        "event_display",
+        "entity",
+        "binary_sensor",
+        "event",
+        "sensor",
+    )
     for name in names:
         qualified_name = f"{package_name}.{name}"
         spec = spec_from_file_location(qualified_name, COMPONENT_PATH / f"{name}.py")
@@ -161,3 +171,30 @@ def test_display_handles_missing_codes_and_limits_long_names(display_modules):
     assert len(formatted) == 255
     assert formatted.endswith("…)")
     assert payload["raw_event_type"] == "x" * 400
+
+
+def test_doorbell_is_available_until_polling_actually_fails(display_modules):
+    api = display_modules.api.HikvisionAccessAPI(
+        host="192.168.1.100",
+        port=443,
+        username="test",
+        password="test",
+        use_https=True,
+        verify_ssl=False,
+        configured_name="Gate",
+        call_status_poll_interval=7,
+    )
+    sensor = display_modules.binary_sensor.HikvisionDoorbellSensor(api)
+
+    assert sensor.available is True
+    assert sensor.is_on is False
+
+    api._set_call_status_poll_state(False, "http_403")
+
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {
+        "call_status": None,
+        "poll_interval_seconds": 7,
+        "polling_available": False,
+        "polling_error": "http_403",
+    }

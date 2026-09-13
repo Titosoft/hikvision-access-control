@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Add a reloading options flow to configure the call-status polling interval
+  between 1 and 60 seconds, defaulting to 2 seconds.
+- Expose the active interval and a safe polling error code on the doorbell entity
+  and in integration diagnostics.
+
+### Fixed
+
+- Show the doorbell as off while its first call-status request is starting instead
+  of briefly marking it unavailable. A persistent unavailable state now identifies
+  an actual polling failure.
+
 ## [0.1.11] - 2026-09-13
 
 ### Changed

@@ -30,6 +30,8 @@ async def async_get_config_entry_diagnostics(
             "firmware": api.firmware_version,
             "available": api.available,
             "call_status_poll_available": api.call_status_poll_available,
+            "call_status_poll_error": api.call_status_poll_error,
+            "call_status_poll_interval": api.call_status_poll_interval,
             "call_status": api.call_status,
             "doorbell_ringing": api.doorbell_ringing,
         },

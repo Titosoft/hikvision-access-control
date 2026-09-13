@@ -18,6 +18,7 @@ from requests.auth import HTTPDigestAuth
 
 from .const import (
     AUTH_SUCCESS_EVENTS,
+    DEFAULT_CALL_STATUS_POLL_INTERVAL,
     DOORBELL_EVENTS,
     EVENT_LABELS,
 )
@@ -28,7 +29,6 @@ _LOGGER = logging.getLogger(__name__)
 DOORBELL_DEDUPLICATION_SECONDS = 5
 DOORBELL_RING_TIMEOUT_SECONDS = 45
 DOORBELL_SNAPSHOT_DELAY_SECONDS = 1
-CALL_STATUS_POLL_INTERVAL_SECONDS = 2
 CALL_STATUS_RETRY_MAX_SECONDS = 30
 CALL_STATUS_PATH = "/ISAPI/VideoIntercom/callStatus?format=json"
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
@@ -99,6 +99,7 @@ class HikvisionAccessAPI:
         use_https: bool,
         verify_ssl: bool,
         configured_name: str,
+        call_status_poll_interval: int = DEFAULT_CALL_STATUS_POLL_INTERVAL,
     ) -> None:
         scheme = "https" if use_https else "http"
         self.base_url = f"{scheme}://{host}:{port}"
@@ -107,6 +108,7 @@ class HikvisionAccessAPI:
         self.password = password
         self.verify_ssl = verify_ssl
         self.configured_name = configured_name
+        self.call_status_poll_interval = call_status_poll_interval
 
         self.device_name = configured_name
         self.model = "Hikvision access-control terminal"
@@ -117,6 +119,7 @@ class HikvisionAccessAPI:
 
         self.available = False
         self.call_status_poll_available: bool | None = None
+        self.call_status_poll_error: str | None = None
         self.call_status: str | None = None
         self.doorbell_ringing = False
         self.last_event: dict[str, Any] | None = None
@@ -256,7 +259,7 @@ class HikvisionAccessAPI:
             _LOGGER.debug(
                 "Starting Hikvision call-status polling for %s every %s seconds",
                 self.host,
-                CALL_STATUS_POLL_INTERVAL_SECONDS,
+                self.call_status_poll_interval,
             )
             self._call_status_thread.start()
 
@@ -288,7 +291,7 @@ class HikvisionAccessAPI:
         if self._call_status_thread is None or not self._call_status_thread.is_alive():
             self._call_status_thread = None
         self._set_available(False)
-        self._set_call_status_poll_available(False)
+        self._set_call_status_poll_state(False)
         _LOGGER.debug("Hikvision event stream for %s stopped", self.host)
 
     def open_door(self, door_no: int = 1) -> None:
@@ -386,7 +389,7 @@ class HikvisionAccessAPI:
 
     def _poll_call_status_forever(self) -> None:
         """Poll callStatus and process state transitions without using HCNetSDK."""
-        delay = CALL_STATUS_POLL_INTERVAL_SECONDS
+        delay = self.call_status_poll_interval
         session = requests.Session()
         session.auth = HTTPDigestAuth(self.username, self.password)
         with self._stream_lock:
@@ -402,8 +405,11 @@ class HikvisionAccessAPI:
                             "status for %s",
                             self.host,
                         )
-                    self._set_call_status_poll_available(False)
-                    delay = CALL_STATUS_RETRY_MAX_SECONDS
+                    self._set_call_status_poll_state(False, "invalid_auth")
+                    delay = max(
+                        CALL_STATUS_RETRY_MAX_SECONDS,
+                        self.call_status_poll_interval,
+                    )
                 except (HikvisionApiError, requests.RequestException, OSError) as err:
                     if self.call_status_poll_available is not False:
                         _LOGGER.warning(
@@ -411,16 +417,24 @@ class HikvisionAccessAPI:
                             self.host,
                             err,
                         )
-                    self._set_call_status_poll_available(False)
-                    delay = min(max(delay * 2, 2), CALL_STATUS_RETRY_MAX_SECONDS)
+                    self._set_call_status_poll_state(
+                        False, self._call_status_poll_error_code(err)
+                    )
+                    delay = min(
+                        max(delay * 2, self.call_status_poll_interval),
+                        max(
+                            CALL_STATUS_RETRY_MAX_SECONDS,
+                            self.call_status_poll_interval,
+                        ),
+                    )
                 else:
                     if self.call_status_poll_available is not True:
                         _LOGGER.info(
                             "Hikvision call-status polling for %s connected",
                             self.host,
                         )
-                    self._set_call_status_poll_available(True)
-                    delay = CALL_STATUS_POLL_INTERVAL_SECONDS
+                    self._set_call_status_poll_state(True)
+                    delay = self.call_status_poll_interval
                     self._handle_polled_call_status(status)
                 if self._stop.wait(delay):
                     break
@@ -1041,11 +1055,27 @@ class HikvisionAccessAPI:
         self.available = available
         self._notify()
 
-    def _set_call_status_poll_available(self, available: bool) -> None:
-        if self.call_status_poll_available == available:
+    def _set_call_status_poll_state(
+        self, available: bool, error: str | None = None
+    ) -> None:
+        if (
+            self.call_status_poll_available == available
+            and self.call_status_poll_error == error
+        ):
             return
         self.call_status_poll_available = available
+        self.call_status_poll_error = error
         self._notify()
+
+    @staticmethod
+    def _call_status_poll_error_code(error: Exception) -> str:
+        if isinstance(error, HikvisionApiError) and error.http_status is not None:
+            return f"http_{error.http_status}"
+        if isinstance(error, HikvisionApiError) and error.isapi_status is not None:
+            return f"isapi_{error.isapi_status}"
+        if "response" in str(error).casefold():
+            return "invalid_response"
+        return "cannot_connect"
 
     @classmethod
     def _redact_log_data(cls, value: Any) -> Any:

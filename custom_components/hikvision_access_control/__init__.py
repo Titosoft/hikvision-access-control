@@ -18,9 +18,11 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .api import HikvisionAccessAPI, HikvisionApiError, HikvisionAuthError
 from .const import (
+    CONF_CALL_STATUS_POLL_INTERVAL,
     CONF_DEVICE_NAME,
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
+    DEFAULT_CALL_STATUS_POLL_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,6 +57,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) ->
         use_https=data[CONF_USE_HTTPS],
         verify_ssl=data[CONF_VERIFY_SSL],
         configured_name=data[CONF_DEVICE_NAME],
+        call_status_poll_interval=entry.options.get(
+            CONF_CALL_STATUS_POLL_INTERVAL,
+            DEFAULT_CALL_STATUS_POLL_INTERVAL,
+        ),
     )
     try:
         await hass.async_add_executor_job(api.get_device_info)

@@ -121,7 +121,7 @@ do HACS para funcionar como repositório personalizado.
 
 ## Campainha pelo estado de chamada ISAPI
 
-A própria integração consulta a cada 2 segundos:
+A própria integração consulta, por padrão, a cada 2 segundos:
 
 ```text
 GET /ISAPI/VideoIntercom/callStatus?format=json
@@ -139,8 +139,10 @@ e outros eventos de acesso. Se ele também publicar a chamada, a deduplicação 
 uma segunda ocorrência. Quando o evento não traz uma imagem, a integração tenta
 obter o snapshot do canal 101.
 
-O custo dessa compatibilidade é uma requisição local leve a cada 2 segundos e uma
-latência de detecção de até aproximadamente 2 segundos.
+O intervalo pode ser alterado entre 1 e 60 segundos em **Configurações →
+Dispositivos e serviços → Hikvision Access Control → Configurar**. Intervalos
+maiores reduzem as requisições, mas podem perder uma chamada que toque por menos
+tempo que o intervalo escolhido.
 
 Exemplo de automação usando a nova entidade:
 
@@ -168,6 +170,10 @@ mode: single
 4. Mantenha HTTPS habilitado. Para o certificado autoassinado padrão do terminal,
    desabilite **Verificar certificado HTTPS**. Habilite a verificação se o terminal
    usar um certificado confiável para o nome/endereço configurado.
+
+Depois de adicionar o terminal, use **Configurar** na entrada da integração para
+alterar o intervalo de consulta da campainha. A alteração recarrega a integração
+automaticamente.
 
 As credenciais ficam na entrada de configuração protegida do Home Assistant e não
 são gravadas no código, em logs de diagnóstico ou nas imagens. É possível alterar
@@ -280,7 +286,11 @@ desabilitada; eles não representam falha do fluxo de eventos.
   progressiva de 2 a 30 segundos.
 - **Campainha tocando indisponível:** confirme que o usuário consegue ler
   `/ISAPI/VideoIntercom/callStatus?format=json`. A consulta se recupera
-  automaticamente, com espera progressiva de até 30 segundos após uma falha.
+  automaticamente, com espera progressiva de até 30 segundos após uma falha no
+  intervalo padrão; intervalos configurados acima disso são respeitados.
+  Nos atributos da entidade, `polling_error` informa `invalid_auth`, `http_...`,
+  `isapi_...`, `invalid_response` ou `cannot_connect` e
+  `poll_interval_seconds` mostra o intervalo em uso.
 - **Evento aparece como “Desconhecido”:** uma entidade `event` recém-criada fica
   nesse estado até receber o primeiro evento; depois confira o atributo
   `event_type`. Em ambas as entidades, `event_code: unknown_access_event` indica

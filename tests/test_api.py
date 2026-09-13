@@ -130,7 +130,7 @@ def _controlled_timer(interval: float) -> ControlledTimer:
     )
 
 
-def _api() -> Any:
+def _api(*, call_status_poll_interval: int = 2) -> Any:
     return HikvisionAccessAPI(
         host="192.168.1.100",
         port=443,
@@ -139,6 +139,7 @@ def _api() -> Any:
         use_https=True,
         verify_ssl=False,
         configured_name="Gate",
+        call_status_poll_interval=call_status_poll_interval,
     )
 
 
@@ -875,6 +876,55 @@ def test_call_status_poll_rejects_response_without_status(monkeypatch) -> None:
 
     with pytest.raises(HikvisionApiError, match="no status"):
         _api()._get_call_status()
+
+
+def test_call_status_poll_uses_configured_interval() -> None:
+    api = _api(call_status_poll_interval=7)
+    waits: list[float] = []
+
+    class StopAfterFirstWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, delay: float) -> bool:
+            waits.append(delay)
+            return True
+
+    api._stop = StopAfterFirstWait()
+    api._get_call_status = lambda session: "idle"
+
+    api._poll_call_status_forever()
+
+    assert waits == [7]
+    assert api.call_status == "idle"
+    assert api.call_status_poll_available is True
+    assert api.call_status_poll_error is None
+    assert api._call_status_session is None
+
+
+def test_call_status_poll_exposes_safe_error_code() -> None:
+    api = _api()
+    waits: list[float] = []
+
+    class StopAfterFirstWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, delay: float) -> bool:
+            waits.append(delay)
+            return True
+
+    def fail_call_status(session) -> str:
+        raise HikvisionApiError("ISAPI returned HTTP 404", http_status=404)
+
+    api._stop = StopAfterFirstWait()
+    api._get_call_status = fail_call_status
+
+    api._poll_call_status_forever()
+
+    assert waits == [4]
+    assert api.call_status_poll_available is False
+    assert api.call_status_poll_error == "http_404"
 
 
 def test_polled_call_status_emits_only_on_transitions(monkeypatch) -> None:
