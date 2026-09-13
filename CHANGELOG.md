@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-09-13
+
 ### Changed
 
 - Detect the doorbell with local two-second polling of the ISAPI `callStatus`
