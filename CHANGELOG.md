@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-13
+
 ### Added
 
 - Add a reloading options flow to configure the call-status polling interval
