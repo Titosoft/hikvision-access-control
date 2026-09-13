@@ -110,8 +110,7 @@
               "security_module_tamper_alarm": "Security module tamper alarm",
               "security_module_tamper_restored": "Security module tamper restored",
               "unknown_access_event": "Unknown access event",
-              "unknown_isapi_event": "Unknown ISAPI event",
-              "unknown_sdk_event": "Unknown SDK event"
+              "unknown_isapi_event": "Unknown ISAPI event"
             }
           }
         }
@@ -121,10 +120,6 @@
       "connection": {
         "name": "ISAPI connection",
         "state": {"offline": "Offline", "online": "Online"}
-      },
-      "sdk_connection": {
-        "name": "SDK bridge connection",
-        "state": {"offline": "Offline", "online": "Online", "unknown": "Unknown"}
       },
       "employee_id": {"name": "Last user ID"},
       "last_access_time": {"name": "Last access time"},
@@ -172,8 +167,7 @@
           "security_module_tamper_alarm": "Security module tamper alarm",
           "security_module_tamper_restored": "Security module tamper restored",
           "unknown_access_event": "Unknown access event",
-          "unknown_isapi_event": "Unknown ISAPI event",
-          "unknown_sdk_event": "Unknown SDK event"
+          "unknown_isapi_event": "Unknown ISAPI event"
         }
       },
       "last_result": {

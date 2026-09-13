@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Detect the doorbell with local two-second polling of the ISAPI `callStatus`
+  endpoint, using only `idle`/`ring` transitions so repeated responses do not
+  emit duplicate events.
+- Keep the HACS integration self-contained: port 8000, native HCNetSDK libraries,
+  MQTT, and a separate Home Assistant App are no longer required.
+
+### Removed
+
+- Retire the optional HCNetSDK bridge App and its container image workflow after
+  confirming `idle` → `ring` → `idle` on the DS-K1T344MX-E1 firmware V4.13.0.
+
 ## [0.1.10] - 2026-09-12
 
 ### Changed

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import sys
@@ -833,7 +832,52 @@ def test_duplicate_doorbell_notification_is_suppressed(monkeypatch) -> None:
     assert len(ControlledTimer.created) == 2
 
 
-def test_sdk_button_callback_sets_ringing_and_expires(monkeypatch) -> None:
+def test_call_status_poll_uses_digest_isapi_and_parses_json(monkeypatch) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> FakeResponse:
+        captured.append({"method": method, "url": url, **kwargs})
+        return FakeResponse(content=b'{"CallStatus":{"status":"ring"}}')
+
+    monkeypatch.setattr(API_MODULE.requests, "request", fake_request)
+    api = _api()
+
+    assert api._get_call_status() == "ring"
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"].endswith(
+        "/ISAPI/VideoIntercom/callStatus?format=json"
+    )
+    assert isinstance(captured[0]["auth"], HTTPDigestAuth)
+    assert captured[0]["timeout"] == 10
+
+
+def test_call_status_poll_accepts_xml_response(monkeypatch) -> None:
+    monkeypatch.setattr(
+        API_MODULE.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(
+            content=(
+                b'<CallStatus xmlns="http://www.isapi.org/ver20/XMLSchema">'
+                b"<status>idle</status></CallStatus>"
+            )
+        ),
+    )
+
+    assert _api()._get_call_status() == "idle"
+
+
+def test_call_status_poll_rejects_response_without_status(monkeypatch) -> None:
+    monkeypatch.setattr(
+        API_MODULE.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(content=b'{"CallStatus":{}}'),
+    )
+
+    with pytest.raises(HikvisionApiError, match="no status"):
+        _api()._get_call_status()
+
+
+def test_polled_call_status_emits_only_on_transitions(monkeypatch) -> None:
     ControlledTimer.created.clear()
     monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
     api = _api()
@@ -841,83 +885,26 @@ def test_sdk_button_callback_sets_ringing_and_expires(monkeypatch) -> None:
     updates: list[bool] = []
     api.add_listener(lambda: updates.append(True))
 
-    api.handle_sdk_event(
-        {
-            "kind": "alarm",
-            "command": "0x1152",
-            "command_hex": "0x1152",
-            "received_at": "2026-09-12T12:00:00+00:00",
-        }
-    )
+    api._handle_polled_call_status("idle")
+    assert api.last_event is None
 
+    api._handle_polled_call_status("ring")
+    ring_event = api.last_event
     assert api.doorbell_ringing is True
-    assert api.last_event["event"] == "doorbell_ringing"
-    assert api.last_event["raw_event_type"] == "sdk_button_down"
-    assert api.last_sdk_command == 0x1152
-    assert api.sdk_connected is True
+    assert ring_event["event"] == "doorbell_ringing"
+    assert ring_event["raw_event_type"] == "changedCallStatus"
+    assert ring_event["call_status"] == "ring"
+    assert ring_event["call_command"] == "poll"
     assert updates == [True]
 
-    _controlled_timer(API_MODULE.DOORBELL_RING_TIMEOUT_SECONDS).fire()
+    api._handle_polled_call_status("ring")
+    assert api.last_event is ring_event
+    assert updates == [True]
 
+    api._handle_polled_call_status("idle")
     assert api.doorbell_ringing is False
+    assert api.last_event is ring_event
     assert updates == [True, True]
-
-
-def test_sdk_isapi_payload_reuses_call_status_parser(monkeypatch) -> None:
-    ControlledTimer.created.clear()
-    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
-    api = _api()
-    payload = {
-        "eventType": "changedCallStatus",
-        "ChangedCallStatus": {"CallStatus": {"cmd": "request", "status": "ringing"}},
-    }
-
-    api.handle_sdk_event(
-        {
-            "kind": "alarm",
-            "command": 0x6009,
-            "command_hex": "0x6009",
-            "payload_type": "json",
-            "payload_b64": base64.b64encode(json.dumps(payload).encode()).decode(),
-        }
-    )
-
-    assert api.doorbell_ringing is True
-    assert api.last_event["event"] == "doorbell_ringing"
-    assert api.last_event["call_status"] == "ringing"
-
-
-def test_sdk_acs_doorbell_event_reuses_access_event_parser(monkeypatch) -> None:
-    ControlledTimer.created.clear()
-    monkeypatch.setattr(API_MODULE.threading, "Timer", ControlledTimer)
-    api = _api()
-    api._loop = InlineLoop()
-
-    api.handle_sdk_event(
-        {
-            "kind": "alarm",
-            "command": 0x5002,
-            "command_hex": "0x5002",
-            "major": 5,
-            "minor": 0x33,
-            "received_at": "2026-09-12T12:00:00+00:00",
-        }
-    )
-
-    assert api.doorbell_ringing is True
-    assert api.last_event["event"] == "doorbell_ringing"
-    assert api.last_event["major"] == 5
-    assert api.last_event["sub_event"] == 51
-
-
-def test_sdk_bridge_status_does_not_replace_last_event() -> None:
-    api = _api()
-    api.last_event = {"event": "face_authenticated"}
-
-    api.handle_sdk_event({"kind": "bridge_status", "status": "online"})
-
-    assert api.sdk_connected is True
-    assert api.last_event == {"event": "face_authenticated"}
 
 
 def test_unrelated_jpeg_is_not_used_as_access_picture() -> None:
@@ -985,10 +972,12 @@ def test_started_stream_thread_stops_cleanly() -> None:
     api = _api()
     loop = asyncio.new_event_loop()
     api._stream_forever = lambda: api._stop.wait()
+    api._poll_call_status_forever = lambda: api._stop.wait()
 
     try:
         api.start(loop)
         api.stop()
         assert api._thread is None
+        assert api._call_status_thread is None
     finally:
         loop.close()

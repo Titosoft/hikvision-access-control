@@ -2,9 +2,9 @@
 
 Integração comunitária para controlar e acompanhar localmente terminais de acesso
 Hikvision pelo protocolo HTTPS/ISAPI. A comunicação ocorre diretamente entre o
-Home Assistant e o equipamento na rede local; não usa nuvem nem MQTT. Um add-on
-opcional e isolado recebe os callbacks HCNetSDK da porta 8000 para firmwares que
-não publicam a chamada no `alertStream`.
+Home Assistant e o equipamento na rede local; não usa nuvem, MQTT, SDK nativa nem
+um add-on separado. Os eventos gerais usam o `alertStream`, enquanto o toque da
+campainha é lido pelo estado de chamada ISAPI.
 
 > Esta é uma integração independente e não oficial. Ela não é desenvolvida,
 > homologada nem suportada pela Hikvision.
@@ -16,16 +16,12 @@ não publicam a chamada no `alertStream`.
 - Transporte: HTTPS/ISAPI na porta 443 com autenticação HTTP Digest.
 - Ambiente-alvo: Home Assistant OS 18.2 e Home Assistant Core 2026.8.3.
 - Os testes automatizados cobrem parser multipart XML/JSON/JPEG fragmentado,
-  autenticação Digest, reconexão do `alertStream` e encerramento do cliente.
+  autenticação Digest, transições do estado de chamada, reconexão do
+  `alertStream` e encerramento do cliente.
 
-O preparo desta versão não incluiu acesso a um equipamento físico. Portanto, a
-versão publicada deve ser validada no DS-K1T344MX-E1 real antes de ser considerada
-homologada para produção. Outros modelos e firmwares não estão confirmados.
-
-O uso da ponte SDK foi preparado para o firmware do DS-K1T344 que anuncia
-**SDK Server** na porta 8000. O App inclui runtimes HCNetSDK separados para
-`aarch64` e `amd64`; esses binários de terceiros não são cobertos pela licença
-MIT deste projeto.
+O endpoint de estado de chamada foi validado em um DS-K1T344MX-E1 com firmware
+V4.13.0 build 241025: ao pressionar o botão, as respostas mudam de `idle` para
+`ring` e retornam a `idle`. Outros modelos e firmwares não estão confirmados.
 
 ## Funcionalidades e entidades
 
@@ -44,8 +40,7 @@ dispositivo no Home Assistant.
 | Sensor | Último evento | Tipo e metadados do último evento recebido |
 | Sensor | Conexão ISAPI | Estado `online`/`offline` do `alertStream` |
 | Binary sensor | Relé de abertura | Último estado lógico de travamento/destravamento |
-| Binary sensor | Campainha tocando | Liga por callback SDK/ISAPI e desliga pelo estado final ou timeout local |
-| Sensor | Conexão da ponte SDK | Estado `online`/`offline` do add-on HCNetSDK opcional |
+| Binary sensor | Campainha tocando | Liga na transição ISAPI de `idle` para `ring` e desliga ao sair de `ring` ou pelo timeout local |
 | Camera | Foto do último acesso | Última parte `Picture` ligada a um acesso, sem substituir pela imagem térmica |
 | Camera | Foto do último visitante | Foto ligada ao último toque da campainha, usando o anexo do evento ou um snapshot |
 
@@ -124,42 +119,28 @@ do HACS para funcionar como repositório personalizado.
    `/config/custom_components/hikvision_access_control`.
 3. Reinicie o Home Assistant.
 
-## Campainha sem polling pela porta 8000
+## Campainha pelo estado de chamada ISAPI
 
-A integração aceita eventos do add-on **Hikvision SDK Bridge**. O add-on faz um
-login persistente na porta 8000, registra o callback global do HCNetSDK e arma o
-canal de alarmes. Não consulta repetidamente o estado do terminal.
+A própria integração consulta a cada 2 segundos:
 
-1. Em **Configurações → Complementos → Loja de complementos → Repositórios**,
-   adicione `https://github.com/Titosoft/hikvision-access-control`.
-2. Instale **Hikvision SDK Bridge** e configure o IP do mesmo terminal usado na
-   integração, porta `8000`, usuário local e senha.
-3. Inicie o add-on. O Supervisor baixa a imagem nativa para a arquitetura do host;
-   não é necessário copiar bibliotecas para `/share`.
-4. O log deve mostrar `HCNetSDK alarm channel armed` e a entidade
-   **Conexão da ponte SDK** deve ficar `Online`.
+```text
+GET /ISAPI/VideoIntercom/callStatus?format=json
+```
 
-No Raspberry Pi, o Home Assistant precisa usar `aarch64`; sistemas `armv7` não
-são suportados pelas versões atuais do Home Assistant. A imagem usa uma base
-Debian/glibc compatível com o runtime Linux empacotado. A ponte roda em processo
-separado para que uma falha numa biblioteca nativa não encerre o Home Assistant
-Core.
+A transição para `ring` liga o binary sensor **Campainha tocando** e gera uma
+única ocorrência `doorbell_ringing`. Respostas `ring` repetidas não duplicam o
+evento. A transição de volta para `idle` desliga o sensor; um temporizador local
+de 45 segundos também o desliga caso o equipamento deixe de responder antes de
+informar o estado final.
 
-O callback `COMM_ALARM_BUTTON_DOWN_EXCEPTION` (`0x1152`) liga imediatamente o
-binary sensor **Campainha tocando**. Eventos `changedCallStatus` recebidos como
-`COMM_ISAPI_ALARM` (`0x6009`) ou `COMM_VCA_ALARM` (`0x4993`) desligam o sensor
-quando a chamada sai do estado de toque. Se o firmware não publicar o estado
-final, um temporizador local de 45 segundos faz o desligamento; esse temporizador
-não acessa o equipamento.
+Não é preciso instalar App/complemento, abrir a porta 8000, copiar bibliotecas ou
+configurar MQTT. O `alertStream` continua ativo para autenticações, relé, alarmes
+e outros eventos de acesso. Se ele também publicar a chamada, a deduplicação evita
+uma segunda ocorrência. Quando o evento não traz uma imagem, a integração tenta
+obter o snapshot do canal 101.
 
-A ponte repete apenas seu estado local de conexão a cada 60 segundos para se
-ressincronizar após reinícios do Home Assistant. Esse heartbeat não consulta o
-terminal e não participa da detecção da campainha.
-
-Como fallback para terminais de controle de acesso, a ponte também reconhece os
-eventos de campainha `(5, 37)` e chamada à central `(5, 51)` dentro de
-`COMM_ALARM_ACS` (`0x5002`). O callback V31 confirma o recebimento ao equipamento,
-como exigido pelo HCNetSDK para essa classe de alarme.
+O custo dessa compatibilidade é uma requisição local leve a cada 2 segundos e uma
+latência de detecção de até aproximadamente 2 segundos.
 
 Exemplo de automação usando a nova entidade:
 
@@ -201,6 +182,7 @@ precisa conseguir:
 - ler `/ISAPI/System/deviceInfo`;
 - ler `/ISAPI/AccessControl/RemoteControl/door/capabilities` para anunciar o botão;
 - ler continuamente `/ISAPI/Event/notification/alertStream`;
+- ler `/ISAPI/VideoIntercom/callStatus?format=json` para detectar a campainha;
 - ler `/Streaming/channels/101/picture` para a foto do visitante quando o evento
   da campainha não incluir uma imagem;
 - executar `PUT /ISAPI/AccessControl/RemoteControl/door/1` para usar o botão.
@@ -296,6 +278,9 @@ desabilitada; eles não representam falha do fluxo de eventos.
 - **Conexão ISAPI offline:** verifique se o Home Assistant alcança
   `https://192.168.1.100:443`. O fluxo se reconecta automaticamente com espera
   progressiva de 2 a 30 segundos.
+- **Campainha tocando indisponível:** confirme que o usuário consegue ler
+  `/ISAPI/VideoIntercom/callStatus?format=json`. A consulta se recupera
+  automaticamente, com espera progressiva de até 30 segundos após uma falha.
 - **Evento aparece como “Desconhecido”:** uma entidade `event` recém-criada fica
   nesse estado até receber o primeiro evento; depois confira o atributo
   `event_type`. Em ambas as entidades, `event_code: unknown_access_event` indica

@@ -38,7 +38,7 @@ class HikvisionRelaySensor(HikvisionAccessEntity, BinarySensorEntity):
 
 
 class HikvisionDoorbellSensor(HikvisionAccessEntity, BinarySensorEntity):
-    """Represent the live doorbell ringing state from push events."""
+    """Represent the live doorbell ringing state."""
 
     _attr_translation_key = "doorbell_ringing"
 
@@ -47,7 +47,7 @@ class HikvisionDoorbellSensor(HikvisionAccessEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.api.available or self.api.sdk_connected is True
+        return self.api.call_status_poll_available is True
 
     @property
     def is_on(self) -> bool:
