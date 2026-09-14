@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-14
+
 ### Added
 
 - Expand the documented Hikvision ACS event catalog to 260 major/minor code pairs
