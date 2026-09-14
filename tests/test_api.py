@@ -325,16 +325,22 @@ def test_only_confirmed_major_and_sub_event_pairs_are_classified() -> None:
 @pytest.mark.parametrize(
     ("major", "minor", "expected"),
     [
+        (1, 0x400, "alarm_input_short_circuit"),
         ("0x5", "0x19", "door_opened"),
         (5, 26, "door_closed"),
+        (5, 29, "alarm_output_on"),
+        (5, 30, "alarm_output_off"),
         (5, 27, "door_forced_open"),
         (5, 28, "door_open_too_long"),
+        (5, 143, "stay_event"),
         (5, 76, "authentication_failed"),
         (1, "0x404", "device_tamper_alarm"),
         (1, "0x40f", "security_module_tamper_alarm"),
         (2, 39, "network_disconnected"),
         (2, 1031, "network_restored"),
         (2, 1040, "security_module_online"),
+        (3, 214, "remote_alarm_output_on"),
+        (3, 1024, "remote_door_open"),
         (3, 112, "remote_login"),
     ],
 )

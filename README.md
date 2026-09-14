@@ -55,6 +55,8 @@ Hikvision. Entre os eventos classificados estão:
 
 - `majorEventType: 5`, `subEventType: 37` (`0x25`): campainha tocando;
 - `majorEventType: 5`, `subEventType: 51` (`0x33`): chamada à central;
+- `majorEventType: 5`, `subEventType: 29` (`0x1d`): saída de alarme ligada;
+- `majorEventType: 5`, `subEventType: 30` (`0x1e`): saída de alarme desligada;
 - `eventType: changedCallStatus` com `status: ring`: chamada de vídeo porteiro;
 - `2/39` (`0x27`) e `2/1031` (`0x407`): rede desconectada e restabelecida;
 - `2/1040` (`0x410`): módulo seguro de controle da porta online;
@@ -64,6 +66,13 @@ Hikvision. Entre os eventos classificados estão:
 - `1/0x404`, `1/0x406` e `1/0x40f`: violação do terminal, leitor ou módulo de
   segurança;
 - falhas e tempos esgotados dos métodos de autenticação mais comuns.
+
+O catálogo inclui os eventos documentados de alarme (`1/*`), exceção (`2/*`),
+operação (`3/*`) e evento de acesso (`5/*`), incluindo estados de alimentação,
+comunicação, controladores, saídas de alarme, autenticação multifator, elevador,
+antipassback e eventos de passagem. Faixas de eventos personalizados do firmware
+continuam sendo exibidas com o código original, pois a Hikvision não define um
+significado comum para elas.
 
 Também são classificados os eventos de autenticação bem-sucedida documentados
 pela Hikvision para cartão, cartão e PIN, digital, combinações de face e outros

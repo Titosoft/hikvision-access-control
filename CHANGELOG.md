@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Expand the documented Hikvision ACS event catalog to 260 major/minor code pairs
+  across alarms, exceptions, operations, and access events. Device-specific custom
+  event ranges remain exposed as raw codes because their meaning is firmware-defined.
+
 ## [0.1.14] - 2026-09-13
 
 ### Fixed
