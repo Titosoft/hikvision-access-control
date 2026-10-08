@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-08
+
 ### Added
 
 - Classify active/inactive ISAPI `tamperdetection` and `shelteralarm` events as
