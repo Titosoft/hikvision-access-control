@@ -34,6 +34,8 @@ async def async_get_config_entry_diagnostics(
             "call_status_poll_interval": api.call_status_poll_interval,
             "call_status": api.call_status,
             "doorbell_ringing": api.doorbell_ringing,
+            "tamper_detected": api.tamper_detected,
+            "tamper_sources": list(api.tamper_sources or ()),
         },
         "last_event": async_redact_data(dict(api.last_event or {}), EVENT_TO_REDACT),
     }

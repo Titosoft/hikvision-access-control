@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Add a tamper binary sensor that aggregates physical tamper and camera obstruction,
+  remains active until every alarm source is restored, and exposes active sources.
+  Its state is unknown before the first tamper event and unavailable without the
+  event stream. Add a sensor-based notification example.
+
 ## [0.1.16] - 2026-10-08
 
 ### Added

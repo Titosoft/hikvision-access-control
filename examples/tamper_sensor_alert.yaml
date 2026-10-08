@@ -1,0 +1,15 @@
+# Conteúdo para o editor YAML de uma automação do Home Assistant.
+# Substitua a entidade e o serviço de notificação pelos seus identificadores.
+# Use como alternativa ao alerta por evento para evitar notificações duplicadas.
+id: hikvision_alertar_sensor_violacao_facial
+alias: Alertar sensor de violação da facial
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.portao_social_violacao
+    to: "on"
+actions:
+  - action: notify.mobile_app_seu_celular
+    data:
+      title: Alerta de segurança na facial
+      message: Detectada violação física ou cobertura/obstrução da câmera da facial.
+mode: single

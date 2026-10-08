@@ -25,6 +25,21 @@ ISAPI_EVENT_LABELS: dict[tuple[str, str], str] = {
     ("shelteralarm", "inactive"): "camera_tamper_restored",
 }
 
+TAMPER_EVENTS: dict[str, tuple[str, bool]] = {
+    "device_tamper_alarm": ("device", True),
+    "device_tamper_restored": ("device", False),
+    "card_reader_tamper_alarm": ("card_reader", True),
+    "card_reader_tamper_restored": ("card_reader", False),
+    "security_module_tamper_alarm": ("security_module", True),
+    "security_module_tamper_restored": ("security_module", False),
+    "sub_controller_tamper_alarm": ("sub_controller", True),
+    "sub_controller_tamper_restored": ("sub_controller", False),
+    "channel_controller_tamper_alarm": ("channel_controller", True),
+    "channel_controller_tamper_restored": ("channel_controller", False),
+    "camera_tamper_alarm": ("camera", True),
+    "camera_tamper_restored": ("camera", False),
+}
+
 EVENT_LABELS: dict[tuple[int, int], str] = {
     # Major alarm (0x1).
     (1, 0x400): "alarm_input_short_circuit",

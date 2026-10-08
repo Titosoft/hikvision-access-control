@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -15,9 +18,37 @@ async def async_setup_entry(
     entry: HikvisionConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up relay status."""
+    """Set up relay, doorbell, and tamper status."""
     api = entry.runtime_data.api
-    async_add_entities([HikvisionRelaySensor(api), HikvisionDoorbellSensor(api)])
+    async_add_entities(
+        [
+            HikvisionRelaySensor(api),
+            HikvisionDoorbellSensor(api),
+            HikvisionTamperSensor(api),
+        ]
+    )
+
+
+class HikvisionTamperSensor(HikvisionAccessEntity, BinarySensorEntity):
+    """Represent physical tamper and camera obstruction reported by the terminal."""
+
+    _attr_translation_key = "tamper"
+    _attr_device_class = BinarySensorDeviceClass.TAMPER
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "tamper")
+
+    @property
+    def available(self) -> bool:
+        return self.api.available
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.api.tamper_detected
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {"active_sources": list(self.api.tamper_sources or ())}
 
 
 class HikvisionRelaySensor(HikvisionAccessEntity, BinarySensorEntity):

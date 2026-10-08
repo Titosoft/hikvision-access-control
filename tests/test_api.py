@@ -697,6 +697,97 @@ def test_camera_obstruction_without_known_state_remains_diagnostic(
     assert api.last_event["event_state"] == event_state
 
 
+@pytest.mark.parametrize(
+    ("alarm", "restored", "source"),
+    [
+        (0x404, 0x405, "device"),
+        (0x406, 0x407, "card_reader"),
+        (0x40F, 0x410, "security_module"),
+        (0x41E, 0x41F, "sub_controller"),
+        (0x422, 0x423, "channel_controller"),
+    ],
+)
+def test_physical_tamper_remains_active_until_matching_restoration(
+    alarm, restored, source
+) -> None:
+    api = _api()
+    assert api.tamper_detected is None
+    for minor, active in [(alarm, True), (75, True), (restored, False)]:
+        api._handle_event_payload(
+            {
+                "eventType": "AccessControllerEvent",
+                "AccessControllerEvent": {
+                    "majorEventType": 5 if minor == 75 else 1,
+                    "subEventType": minor,
+                },
+            }
+        )
+        assert api.tamper_detected is active
+        assert api.tamper_sources == ((source,) if active else ())
+
+
+def test_tamper_restoration_only_clears_the_matching_source() -> None:
+    api = _api()
+    api._handle_event_payload(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {"majorEventType": 1, "subEventType": 0x40F},
+        }
+    )
+    for channel in (1, 2):
+        api._handle_event_payload(
+            {"eventType": "shelteralarm", "eventState": "active", "channelID": channel}
+        )
+    api._handle_event_payload(
+        {"eventType": "tamperdetection", "eventState": "inactive", "channelID": "1"}
+    )
+    assert api.tamper_detected is True
+    assert api.tamper_sources == ("camera:2", "security_module")
+
+    api._handle_event_payload(
+        {"eventType": "shelteralarm", "eventState": "unexpected", "channelID": 2}
+    )
+    assert api.tamper_sources == ("camera:2", "security_module")
+    api._handle_event_payload(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {"majorEventType": 1, "subEventType": 0x410},
+        }
+    )
+    assert api.tamper_detected is True
+    assert api.tamper_sources == ("camera:2",)
+    api._handle_event_payload(
+        {"eventType": "shelteralarm", "eventState": "inactive", "channelID": 2}
+    )
+    assert api.tamper_detected is False
+    assert api.tamper_sources == ()
+
+
+def test_reader_tamper_is_tracked_per_reader() -> None:
+    api = _api()
+    for reader, minor in [(1, 0x406), (2, 0x406), ("1", 0x407)]:
+        api._handle_event_payload(
+            {
+                "eventType": "AccessControllerEvent",
+                "AccessControllerEvent": {
+                    "majorEventType": 1,
+                    "subEventType": minor,
+                    "cardReaderNo": reader,
+                },
+            }
+        )
+    assert api.tamper_detected is True
+    assert api.tamper_sources == ("card_reader:2",)
+
+
+def test_first_camera_restoration_establishes_clear_state() -> None:
+    api = _api()
+    api._handle_event_payload({"eventType": "heartBeat", "eventState": "active"})
+    assert api.tamper_detected is None
+    api._handle_event_payload({"eventType": "shelteralarm", "eventState": "inactive"})
+    assert api.tamper_detected is False
+
+
 @pytest.mark.parametrize("event_state", ["active", None, "unexpected"])
 def test_videoloss_without_inactive_state_remains_diagnostic(event_state) -> None:
     api = _api()

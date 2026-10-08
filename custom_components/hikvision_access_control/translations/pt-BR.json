@@ -59,6 +59,7 @@
   },
   "entity": {
     "binary_sensor": {
+      "tamper": {"name": "Violação"},
       "doorbell_ringing": {"name": "Campainha tocando"},
       "relay_unlocked": {"name": "Relé de abertura"}
     },

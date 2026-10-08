@@ -41,6 +41,7 @@ dispositivo no Home Assistant.
 | Sensor | Conexão ISAPI | Estado `online`/`offline` do `alertStream` |
 | Binary sensor | Relé de abertura | Último estado lógico de travamento/destravamento |
 | Binary sensor | Campainha tocando | Liga na transição ISAPI de `idle` para `ring` e desliga ao sair de `ring` ou pelo timeout local |
+| Binary sensor | Violação | Agrega alarmes físicos de tamper e cobertura/obstrução da câmera; expõe as fontes ativas |
 | Camera | Foto do último acesso | Última parte `Picture` ligada a um acesso, sem substituir pela imagem térmica |
 | Camera | Foto do último visitante | Foto ligada ao último toque da campainha, usando o anexo do evento ou um snapshot |
 
@@ -261,6 +262,27 @@ mode: queued
 ```
 
 ### Alertas de violação e perda de conexão
+
+O sensor binário **“Violação”**, com classe `tamper`, fica `on` ao receber um
+alarme de violação do terminal, leitor, módulo seguro, subcontrolador, controlador
+de canal ou câmera. Cada fonte permanece ativa até seu evento de restauração;
+o sensor só volta para `off` quando todas as fontes ativas forem restauradas.
+Eventos de acesso, campainha e outros alarmes não limpam o tamper. O atributo
+`active_sources` identifica as fontes, incluindo o canal da câmera ou número do
+leitor quando informados pelo equipamento.
+
+Ao iniciar ou recarregar a integração, o sensor começa `unknown` até receber um
+evento de alarme ou restauração. Sem o `alertStream`, fica `unavailable`, mesmo
+se o estado de chamada ainda puder ser consultado. A desconexão não apaga as
+fontes armazenadas durante essa execução. O estado reflete eventos recebidos:
+restaurações perdidas enquanto desconectado não são inferidas automaticamente.
+
+Para alertar quando o sensor passar para `on`, adapte
+[examples/tamper_sensor_alert.yaml](examples/tamper_sensor_alert.yaml). Esse
+exemplo é uma alternativa ao alerta por evento abaixo: use um deles para evitar
+notificações duplicadas. A transição para `on` avisa a primeira violação; para
+avisar cada nova ocorrência mesmo com o sensor já ativo, use o alerta por evento.
+O monitoramento da conexão permanece separado.
 
 O arquivo [examples/security_alerts.yaml](examples/security_alerts.yaml) contém
 duas automações prontas para adaptar: uma alerta imediatamente para violação do

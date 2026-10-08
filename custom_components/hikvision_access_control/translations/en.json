@@ -59,6 +59,7 @@
   },
   "entity": {
     "binary_sensor": {
+      "tamper": {"name": "Tamper"},
       "doorbell_ringing": {"name": "Doorbell ringing"},
       "relay_unlocked": {"name": "Opening relay"}
     },

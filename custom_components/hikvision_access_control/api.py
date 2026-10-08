@@ -22,6 +22,7 @@ from .const import (
     DOORBELL_EVENTS,
     EVENT_LABELS,
     ISAPI_EVENT_LABELS,
+    TAMPER_EVENTS,
 )
 from .parser import HikvisionMultipartParser
 
@@ -129,6 +130,7 @@ class HikvisionAccessAPI:
         self.last_auth: dict[str, Any] | None = None
         self.last_result: str | None = None
         self.relay_unlocked: bool | None = None
+        self.tamper_sources: tuple[str, ...] | None = None
         self.door_control_supported: bool | None = None
         self.latest_picture: bytes | None = None
         self.latest_picture_time: datetime | None = None
@@ -739,6 +741,7 @@ class HikvisionAccessAPI:
                 key: value for key, value in payload.items() if key not in common_fields
             },
         }
+        self._update_tamper_state(event_name, payload)
         if event_name == "unknown_isapi_event":
             _LOGGER.warning(
                 "Received unclassified Hikvision ISAPI event from %s "
@@ -905,6 +908,7 @@ class HikvisionAccessAPI:
         if event_code in DOORBELL_EVENTS:
             self._set_doorbell_ringing(True)
         self.last_event = normalized
+        self._update_tamper_state(event_name, detail)
 
         if event_code == (5, 21):
             self.relay_unlocked = True
@@ -922,6 +926,33 @@ class HikvisionAccessAPI:
             return
 
         self._notify()
+
+    @property
+    def tamper_detected(self) -> bool | None:
+        """Return the aggregate tamper state once an alarm or restore was received."""
+        if self.tamper_sources is None:
+            return None
+        return bool(self.tamper_sources)
+
+    def _update_tamper_state(self, event_name: str, detail: dict[str, Any]) -> None:
+        """Keep each tamper source latched until its matching restoration."""
+        event = TAMPER_EVENTS.get(event_name)
+        if event is None:
+            return
+        source, active = event
+        source_id = None
+        if source == "camera":
+            source_id = detail.get("channelID") or detail.get("videoInputChannelID")
+        elif source == "card_reader":
+            source_id = detail.get("cardReaderNo")
+        if source_id is not None:
+            source = f"{source}:{source_id}"
+        sources = set(self.tamper_sources or ())
+        if active:
+            sources.add(source)
+        else:
+            sources.discard(source)
+        self.tamper_sources = tuple(sorted(sources))
 
     def _set_doorbell_ringing(self, ringing: bool) -> None:
         """Update ringing state and maintain a local no-polling safety timeout."""

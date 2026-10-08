@@ -33,7 +33,10 @@ def display_modules(monkeypatch):
     modules = {
         "homeassistant": {},
         "homeassistant.components": {},
-        "homeassistant.components.binary_sensor": {"BinarySensorEntity": Entity},
+        "homeassistant.components.binary_sensor": {
+            "BinarySensorEntity": Entity,
+            "BinarySensorDeviceClass": SimpleNamespace(TAMPER="tamper"),
+        },
         "homeassistant.components.event": {"EventEntity": EventEntity},
         "homeassistant.components.sensor": {
             "SensorEntity": Entity,
@@ -254,3 +257,49 @@ def test_entities_remain_available_when_call_status_confirms_device(display_modu
     api._set_call_status_poll_state(True)
 
     assert entity.available is True
+
+
+def test_tamper_sensor_tracks_alarm_and_requires_live_event_stream(display_modules):
+    modules = display_modules
+    api = modules.api.HikvisionAccessAPI(
+        host="192.168.1.100",
+        port=443,
+        username="test",
+        password="test",
+        use_https=True,
+        verify_ssl=False,
+        configured_name="Gate",
+    )
+    sensor = modules.binary_sensor.HikvisionTamperSensor(api)
+    assert sensor._attr_device_class == "tamper"
+    assert sensor.is_on is None
+    assert sensor.available is False
+    added = []
+    asyncio.run(
+        modules.binary_sensor.async_setup_entry(
+            None,
+            SimpleNamespace(runtime_data=SimpleNamespace(api=api)),
+            added.extend,
+        )
+    )
+    assert any(isinstance(entity, type(sensor)) for entity in added)
+
+    api._set_available(True)
+    api._handle_event_payload(
+        {"eventType": "shelteralarm", "eventState": "active", "channelID": 1}
+    )
+    assert sensor.is_on is True
+    assert sensor.available is True
+    assert sensor.extra_state_attributes == {"active_sources": ["camera:1"]}
+    api._set_call_status_poll_state(True)
+    api._set_available(False)
+    assert sensor.available is False
+    assert sensor.is_on is True
+    assert sensor.extra_state_attributes == {"active_sources": ["camera:1"]}
+    api._set_available(True)
+    assert sensor.is_on is True
+    api._handle_event_payload(
+        {"eventType": "shelteralarm", "eventState": "inactive", "channelID": 1}
+    )
+    assert sensor.is_on is False
+    assert sensor.extra_state_attributes == {"active_sources": []}
