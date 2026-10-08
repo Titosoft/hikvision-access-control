@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-10-08
+
 ### Added
 
 - Add a tamper binary sensor that aggregates physical tamper and camera obstruction,
