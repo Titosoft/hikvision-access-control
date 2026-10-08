@@ -157,6 +157,43 @@ def test_unknown_source_is_visible_and_automation_code_is_stable(
     assert sensor.options == modules.sensor.EVENT_OPTIONS
 
 
+@pytest.mark.parametrize("language", ["pt-BR", "en"])
+def test_camera_tamper_is_available_for_automations_and_translated(
+    display_modules, language
+):
+    modules = display_modules
+    api = modules.api.HikvisionAccessAPI(
+        host="192.168.1.100",
+        port=443,
+        username="test",
+        password="test",
+        use_https=True,
+        verify_ssl=False,
+        configured_name="Gate",
+    )
+    entity = modules.event.HikvisionAccessEvent(api, {})
+    sensor = modules.sensor.HikvisionLastEventSensor(api, {})
+    translations = json.loads(
+        (COMPONENT_PATH / "translations" / f"{language}.json").read_text()
+    )["entity"]
+
+    for state, code in (
+        ("active", "camera_tamper_alarm"),
+        ("inactive", "camera_tamper_restored"),
+    ):
+        api._handle_event_payload({"eventType": "shelteralarm", "eventState": state})
+        entity._handle_api_update()
+        assert entity.fired[0] == sensor.native_value == code
+        assert code in modules.event.EVENT_TYPES
+        assert code in modules.sensor.EVENT_OPTIONS
+        assert entity.fired[1]["event_code"] == code
+        assert sensor.extra_state_attributes["event_code"] == code
+        assert code in translations["sensor"]["last_event"]["state"]
+        assert code in translations["event"]["access_event"]["state_attributes"][
+            "event_type"
+        ]["state"]
+
+
 def test_display_handles_missing_codes_and_limits_long_names(display_modules):
     display = display_modules.event_display.event_display_type
     assert display(None, {}) is None

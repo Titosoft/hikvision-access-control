@@ -17,6 +17,14 @@ MAX_CALL_STATUS_POLL_INTERVAL = 60
 
 PLATFORMS = ["binary_sensor", "button", "camera", "event", "sensor"]
 
+# Video obstruction events use ISAPI types rather than ACS major/minor codes.
+ISAPI_EVENT_LABELS: dict[tuple[str, str], str] = {
+    ("tamperdetection", "active"): "camera_tamper_alarm",
+    ("tamperdetection", "inactive"): "camera_tamper_restored",
+    ("shelteralarm", "active"): "camera_tamper_alarm",
+    ("shelteralarm", "inactive"): "camera_tamper_restored",
+}
+
 EVENT_LABELS: dict[tuple[int, int], str] = {
     # Major alarm (0x1).
     (1, 0x400): "alarm_input_short_circuit",

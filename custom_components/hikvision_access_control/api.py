@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_CALL_STATUS_POLL_INTERVAL,
     DOORBELL_EVENTS,
     EVENT_LABELS,
+    ISAPI_EVENT_LABELS,
 )
 from .parser import HikvisionMultipartParser
 
@@ -723,8 +724,12 @@ class HikvisionAccessAPI:
             "protocol",
             "macAddress",
         }
+        event_name = ISAPI_EVENT_LABELS.get(
+            (event_type, str(payload.get("eventState") or "").casefold()),
+            "unknown_isapi_event",
+        )
         self.last_event = {
-            "event": "unknown_isapi_event",
+            "event": event_name,
             "raw_event_type": raw_event_type,
             "event_state": payload.get("eventState"),
             "event_description": payload.get("eventDescription"),
@@ -734,12 +739,22 @@ class HikvisionAccessAPI:
                 key: value for key, value in payload.items() if key not in common_fields
             },
         }
-        _LOGGER.warning(
-            "Received unclassified Hikvision ISAPI event from %s (type=%s, state=%s)",
-            self.host,
-            raw_event_type,
-            payload.get("eventState"),
-        )
+        if event_name == "unknown_isapi_event":
+            _LOGGER.warning(
+                "Received unclassified Hikvision ISAPI event from %s "
+                "(type=%s, state=%s)",
+                self.host,
+                raw_event_type,
+                payload.get("eventState"),
+            )
+        else:
+            _LOGGER.debug(
+                "Classified Hikvision ISAPI event from %s as %s (type=%s, state=%s)",
+                self.host,
+                event_name,
+                raw_event_type,
+                payload.get("eventState"),
+            )
         self._notify()
 
     def _handle_changed_call_status(self, payload: dict[str, Any]) -> bool:

@@ -630,6 +630,73 @@ def test_stream_heartbeat_preserves_access_event_and_pending_picture(
     assert updates == [True]
 
 
+@pytest.mark.parametrize("content_type", ["application/json", "application/xml"])
+@pytest.mark.parametrize("event_type", ["tamperdetection", "shelteralarm"])
+@pytest.mark.parametrize(
+    ("event_state", "expected"),
+    [("Active", "camera_tamper_alarm"), ("Inactive", "camera_tamper_restored")],
+)
+def test_camera_obstruction_reports_tamper_and_restoration(
+    content_type, event_type, event_state, expected
+) -> None:
+    api = _api()
+    api._loop = InlineLoop()
+    updates = []
+    api.add_listener(lambda: updates.append(True))
+    api._handle_event_payload(
+        {
+            "eventType": "AccessControllerEvent",
+            "AccessControllerEvent": {"majorEventType": 5, "subEventType": 75},
+        }
+    )
+    last_auth = api.last_auth
+    api._pending_picture_parts = 1
+    api._pending_picture_target = "access"
+    payload = {
+        "eventType": event_type.upper(),
+        "eventState": event_state,
+        "channelID": 1,
+        "dateTime": "2026-10-08T10:00:00-03:00",
+    }
+    if content_type == "application/json":
+        body = json.dumps(payload).encode()
+    else:
+        body = (
+            '<EventNotificationAlert xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            + "".join(f"<{key}>{value}</{key}>" for key, value in payload.items())
+            + "</EventNotificationAlert>"
+        ).encode()
+    updates.clear()
+
+    api._handle_part({"content-type": content_type}, body)
+
+    assert api.last_event["event"] == expected
+    assert api.last_event["raw_event_type"] == event_type.upper()
+    assert api.last_event["event_state"] == event_state
+    assert api.last_event["date_time"] == payload["dateTime"]
+    channel_id = 1 if content_type == "application/json" else "1"
+    assert api.last_event["event_data"] == {"channelID": channel_id}
+    assert api.last_auth is last_auth
+    assert api._pending_picture_parts == 0
+    assert api._pending_picture_target is None
+    assert updates == [True]
+
+
+@pytest.mark.parametrize("event_type", ["tamperdetection", "shelteralarm"])
+@pytest.mark.parametrize("event_state", [None, "unexpected"])
+def test_camera_obstruction_without_known_state_remains_diagnostic(
+    event_type, event_state
+) -> None:
+    api = _api()
+    api._handle_event_payload(
+        {"eventType": event_type, "eventState": event_state, "channelID": 1}
+    )
+
+    assert api.last_event["event"] == "unknown_isapi_event"
+    assert api.last_event["raw_event_type"] == event_type
+    assert api.last_event["event_state"] == event_state
+
+
 @pytest.mark.parametrize("event_state", ["active", None, "unexpected"])
 def test_videoloss_without_inactive_state_remains_diagnostic(event_state) -> None:
     api = _api()

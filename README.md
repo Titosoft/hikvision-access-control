@@ -67,6 +67,14 @@ Hikvision. Entre os eventos classificados estão:
   segurança;
 - falhas e tempos esgotados dos métodos de autenticação mais comuns.
 
+Eventos ISAPI de obstrução de vídeo (`tamperdetection` e `shelteralarm`) são
+tratados como violação física da câmera: `eventState: active` gera
+`camera_tamper_alarm`, e `eventState: inactive` gera `camera_tamper_restored`.
+O tipo original, estado e dados do canal permanecem nos atributos. Esses nomes
+fazem parte do protocolo ISAPI; a emissão ao cobrir a câmera ainda precisa ser
+validada no DS-K1T344MX-E1 e no firmware instalado. A classificação depende de
+receber o evento do equipamento, sem analisar imagens para detectar obstrução.
+
 O catálogo inclui os eventos documentados de alarme (`1/*`), exceção (`2/*`),
 operação (`3/*`) e evento de acesso (`5/*`), incluindo estados de alimentação,
 comunicação, controladores, saídas de alarme, autenticação multifator, elevador,
@@ -251,6 +259,31 @@ actions:
         image: /api/camera_proxy/camera.portao_social_foto_do_ultimo_visitante
 mode: queued
 ```
+
+### Alertas de violação e perda de conexão
+
+O arquivo [examples/security_alerts.yaml](examples/security_alerts.yaml) contém
+duas automações prontas para adaptar: uma alerta imediatamente para violação do
+terminal, leitor de cartão, módulo seguro ou cobertura/obstrução da câmera; a
+outra alerta quando o sensor “Conexão ISAPI” permanece `offline` por 30 segundos.
+Troque os identificadores das entidades e `notify.mobile_app_seu_celular` pelos
+da sua instalação. O arquivo é uma lista para `automations.yaml`; no editor YAML
+de uma única automação, copie apenas o conteúdo do item desejado sem o hífen
+inicial. A instalação da integração não habilita essas automações automaticamente.
+
+A perda de conexão é um indício de possível corte de cabo, falta de energia ou
+falha de comunicação; o sensor acompanha o `alertStream` e não distingue essas
+causas. Os 30 segundos começam depois de detectar a desconexão. Um corte sem
+fechamento da conexão pode levar até o timeout de leitura de 60 segundos para
+ser percebido, seguido da espera de 30 segundos da automação. O Home Assistant
+e o caminho de entrega da notificação precisam continuar funcionando.
+
+Para validar, acompanhe “Evento de acesso” e cubra a câmera em um teste
+controlado: procure `camera_tamper_alarm` e, ao descobrir, a restauração. Se
+nenhum evento chegar, confirme o suporte/configuração de detecção de obstrução
+no terminal; o mapeamento por si só não cria um sinal que o firmware não emite.
+Depois teste a desconexão de rede ou energia e confira a mudança para `offline`
+e a notificação após a espera configurada.
 
 ## Solução de problemas
 

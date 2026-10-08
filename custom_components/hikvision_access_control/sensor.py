@@ -12,12 +12,14 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import HikvisionConfigEntry
-from .const import EVENT_LABELS
+from .const import EVENT_LABELS, ISAPI_EVENT_LABELS
 from .entity import HikvisionAccessEntity, async_get_unknown_event_labels
 from .event_display import event_display_type
 
 EVENT_OPTIONS = sorted(
-    set(EVENT_LABELS.values()) | {"unknown_access_event", "unknown_isapi_event"}
+    set(EVENT_LABELS.values())
+    | set(ISAPI_EVENT_LABELS.values())
+    | {"unknown_access_event", "unknown_isapi_event"}
 )
 
 

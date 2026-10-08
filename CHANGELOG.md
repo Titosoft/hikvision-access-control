@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Classify active/inactive ISAPI `tamperdetection` and `shelteralarm` events as
+  camera tamper alarms and restoration, preserving their original metadata.
+- Add Home Assistant automation examples for physical tamper, camera obstruction,
+  and sustained ISAPI disconnection covering possible cable or power loss.
+
 ## [0.1.15] - 2026-09-14
 
 ### Added
