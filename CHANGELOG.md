@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Discover optional ISAPI capabilities and expose supported door contact, relay
+  circuit, secure door module, battery, and terminal health readings. Report raw
+  battery voltage in diagnostics when the firmware provides it.
+- Record accepted door-open commands and correlate them with a physical opening
+  reported by the door contact.
+- Add diagnostic request timings, stream heartbeats, and disconnection intervals.
+  Add a paginated access history action for investigating gaps and reviewing
+  authentication counts by result and method.
+- Expose ISAPI call status and terminal SIP and VoIP registration states. Add an
+  action for reporting SIP call stages and a VoIP Stack automation example that
+  alerts when the doorbell rings without a matching call.
+
+### Changed
+
+- Include denied and timed-out attempts in the last authentication result. The
+  last user and access timestamp still refer to the most recent authorized access.
+
 ## [0.1.17] - 2026-10-08
 
 ### Added
