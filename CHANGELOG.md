@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-11-20
+
 ### Added
 
 - Discover optional ISAPI capabilities and expose supported door contact, relay
