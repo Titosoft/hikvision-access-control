@@ -215,6 +215,69 @@ Os nomes das permissões variam conforme o firmware. Habilite acesso ISAPI, leit
 de eventos e controle remoto da porta; não use a conta de administrador se um
 perfil restrito puder executar essas três operações.
 
+## Observabilidade do terminal
+
+Após carregar a integração, o Home Assistant consulta as capacidades e cria as
+entidades opcionais conforme as primeiras leituras e eventos válidos. As consultas
+de diagnóstico têm ciclo próprio. Uma leitura sem permissão ou sem suporte aparece
+no diagnóstico do dispositivo, e a campainha continua no intervalo configurado.
+
+| Origem | Dados disponíveis conforme o firmware |
+| --- | --- |
+| `GET /ISAPI/AccessControl/AcsWorkStatus?format=json` | Contato, circuito do relé e modo da porta 1, alimentação e bateria, estados SIP e VoIP, rede, cartão de memória e contagem de cartões. Entradas, saídas de alarme e leitores aparecem no diagnóstico. Consulta a cada 30 s. |
+| `GET /ISAPI/System/status` | Tempo em funcionamento, CPU, memória, temperatura interna e relógio do equipamento. Consulta a cada 60 s. |
+| `GET /ISAPI/AccessControl/UserInfo/Count?format=json` | Contagem de usuários cadastrados. Consulta a cada 5 min. |
+| `alertStream` | Mudanças do contato, comunicação do módulo seguro, eventos de alimentação, violação e resultado de autenticação. O sensor **Conexão ISAPI** informa o último heartbeat recebido, reconexões e, quando houver, o intervalo da última interrupção em `last_gap`. |
+| Capacidades ISAPI | O diagnóstico mostra os campos anunciados em `AcsWorkStatus/capabilities`, as flags de interfone em `VideoIntercom/capabilities` e os canais anunciados por `System/TwoWayAudio/channels`. |
+
+O sensor **Contato da porta** depende de um contato magnético instalado e de um
+estado que o terminal consiga ler ou receber do módulo seguro. Um curto-circuito
+ou circuito interrompido aparece no sensor de circuito, com a posição física
+desconhecida. Confirme no Home Assistant a mudança de estado ao abrir e fechar o
+portão. **Último comando de abertura aceito** registra o horário e a latência do
+botão. Seu atributo `contact_observed_at` é preenchido se uma abertura for
+observada até 60 segundos após o início daquele comando.
+
+**Último resultado** aceita `authorized`, `denied` e `timeout` para os eventos
+de autenticação classificados. **Último usuário** e a hora do último acesso
+continuam ligados ao último acesso autorizado.
+
+O campo opcional `batteryVoltage` aparece no diagnóstico como
+`battery_voltage_raw`. O valor representa a bateria de backup e deve ser
+calibrado antes de ser apresentado em volts. A medição de corrente, tensão de
+entrada e consumo do K1T344 depende da instrumentação da alimentação. Consulte
+[as especificações do K1T344](https://assets.hikvision.com/prd/normal/all/doc/m000126761/DS-K1T344MX-E1_Datasheet_20250725.pdf).
+
+### Consultar um intervalo no histórico
+
+Em **Ferramentas de desenvolvedor → Ações**, escolha **Consultar histórico de
+acesso**, selecione o terminal e informe o período. A conta ISAPI precisa ter
+permissão de pesquisa em `POST /ISAPI/AccessControl/AcsEvent?format=json`.
+Depois de uma reconexão, os horários em `last_gap` podem alimentar a consulta.
+A resposta contém códigos, horários, números de porta e serial dos eventos,
+contagens de autenticação da amostra por resultado e método, `total_matches` quando informado pelo
+terminal e `truncated` quando restarem resultados. As consultas retornam até 100
+registros, sem fotos e sem republicar os registros como eventos ao vivo.
+
+### Acompanhar a chamada SIP
+
+**Estado da chamada ISAPI** mostra o estado informado pelo terminal, com origem
+`poll` ou `stream`. **Estado SIP do terminal** e **Estado VoIP do terminal**
+aparecem quando o `AcsWorkStatus` retorna os campos correspondentes. O sensor
+**Etapa da chamada no servidor SIP** passa a aparecer quando o VoIP Stack informa
+`received`, `connected` ou `ended` pela ação `report_sip_call`. O horário de cada
+etapa fica disponível para automações. Uma etapa `connected` confirma a chamada no
+servidor. Para confirmar a mídia, teste voz nos dois sentidos ou consulte as
+métricas RTP/RTCP do servidor quando disponíveis.
+
+O [exemplo de automações SIP](examples/voip_observability.yaml) usa os gatilhos
+do VoIP Stack para preencher esse sensor e avisar quando a campainha toca sem
+uma chamada correspondente chegar ao ramal do morador. Configure o remetente e o
+destino no exemplo para identificar a chamada do portão. Para obter o ID da
+entrada, selecione o terminal na ação **Registrar etapa da chamada SIP** e
+alterne o editor da ação para YAML. Para texto falado no interfone, veja a
+configuração do contato **Recado de entrega** abaixo.
+
 ## Automação de exemplo
 
 Substitua os `entity_id` pelos identificadores criados na sua instalação:
@@ -260,6 +323,53 @@ actions:
         image: /api/camera_proxy/camera.portao_social_foto_do_ultimo_visitante
 mode: queued
 ```
+
+### Atender pelo celular e dar um recado de entrega
+
+A campainha e o botão **Abrir portão** usam ISAPI. Para conversar com o
+visitante ou reproduzir uma frase no alto-falante do terminal, o Home Assistant
+também precisa receber a ligação do interfone. A Hikvision lista SIP padrão
+como recurso novo da V4.47.0 para o DS-K1T344MX-E1. Em um terminal com V4.13.0,
+receber `doorbell_ringing` confirma a campainha, mas ainda é preciso verificar se
+o firmware oferece **SIP padrão** para conectar a voz. [Notas do fabricante](https://assets.hikvision.com/prd/normal/all/files/202510/releasenote%5CDS-K1T344_Series_MinMoe_Terminal_V4.47.0_build250722_Release_Note.pdf)
+
+1. No **VoIP Stack**, configure um telefone de navegador para o morador e um
+   ramal SIP para o terminal. Quando o terminal oferecer SIP padrão, registre
+   esse ramal no servidor do Home Assistant e configure o botão de chamada para
+   discar o ramal do morador. Se já houver um tronco para o porteiro, confira
+   primeiro se ele entrega a chamada ao telefone do morador.
+2. No painel de atendimento, adicione o cartão do telefone, a câmera do portão
+   e o botão **Abrir portão** da integração Hikvision. No aviso do Companion
+   para iOS, use o caminho desse painel no campo `data.url` da notificação.
+   Abra o painel, habilite o microfone e toque a campainha. O telefone deve
+   passar para `ringing`. Atenda e verifique a voz nos dois sentidos.
+3. Na agenda do VoIP Stack, crie um contato do tipo **Automation** chamado
+   **Recado de entrega**. No editor de automações, use o exemplo abaixo e
+   selecione a entidade de síntese de voz da sua instalação.
+
+```yaml
+alias: Falar recado de entrega para o visitante
+triggers:
+  - trigger: voip_stack.call_received
+    options:
+      destination: Recado de entrega
+actions:
+  - action: voip_stack.tts_say
+    data:
+      tts_entity_id: tts.google_translate_en_com
+      language: pt
+      message: Olá! Por favor, deixe a encomenda na garagem. Muito obrigado!
+mode: parallel
+```
+
+Configure o botão **Recado de entrega** no painel para executar
+`voip_stack.forward`. Selecione o telefone do morador em **Phone**, informe
+`Recado de entrega` em **Destination** e `ringing` em **Expected state**.
+Use o botão enquanto o telefone toca. O contato atende, transmite a frase e
+encerra a chamada. Para conversar pessoalmente, use **Atender** no cartão do
+telefone. Para liberar a entrada, pressione **Abrir portão**. Um sensor
+magnético na folha do portão permite acompanhar a abertura física.
+[Guia de chamadas e recados do VoIP Stack](https://github.com/n-IA-hane/esphome-intercom/blob/v2026.11.0/docs/AUTOMATION_DIALPLAN.md)
 
 ### Alertas de violação e perda de conexão
 

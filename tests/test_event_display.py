@@ -35,17 +35,34 @@ def display_modules(monkeypatch):
         "homeassistant.components": {},
         "homeassistant.components.binary_sensor": {
             "BinarySensorEntity": Entity,
-            "BinarySensorDeviceClass": SimpleNamespace(TAMPER="tamper"),
+            "BinarySensorDeviceClass": SimpleNamespace(
+                TAMPER="tamper",
+                DOOR="door",
+                BATTERY="battery",
+                CONNECTIVITY="connectivity",
+            ),
         },
         "homeassistant.components.event": {"EventEntity": EventEntity},
         "homeassistant.components.sensor": {
             "SensorEntity": Entity,
-            "SensorDeviceClass": SimpleNamespace(ENUM="enum", TIMESTAMP="timestamp"),
+            "SensorDeviceClass": SimpleNamespace(
+                ENUM="enum",
+                TIMESTAMP="timestamp",
+                DURATION="duration",
+                DATA_SIZE="data_size",
+                TEMPERATURE="temperature",
+            ),
+            "SensorEntityDescription": SimpleNamespace,
+            "SensorStateClass": SimpleNamespace(MEASUREMENT="measurement"),
         },
         "homeassistant.const": {
-            "EntityCategory": SimpleNamespace(DIAGNOSTIC="diagnostic")
+            "EntityCategory": SimpleNamespace(DIAGNOSTIC="diagnostic"),
+            "PERCENTAGE": "%",
+            "UnitOfInformation": SimpleNamespace(MEGABYTES="MB"),
+            "UnitOfTemperature": SimpleNamespace(CELSIUS="°C"),
+            "UnitOfTime": SimpleNamespace(SECONDS="s"),
         },
-        "homeassistant.core": {"HomeAssistant": object},
+        "homeassistant.core": {"HomeAssistant": object, "callback": lambda func: func},
         "homeassistant.helpers": {},
         "homeassistant.helpers.entity": {"Entity": Entity},
         "homeassistant.helpers.entity_platform": {
@@ -82,6 +99,7 @@ def display_modules(monkeypatch):
     names = (
         "const",
         "parser",
+        "observability",
         "api",
         "event_display",
         "entity",
@@ -192,9 +210,12 @@ def test_camera_tamper_is_available_for_automations_and_translated(
         assert entity.fired[1]["event_code"] == code
         assert sensor.extra_state_attributes["event_code"] == code
         assert code in translations["sensor"]["last_event"]["state"]
-        assert code in translations["event"]["access_event"]["state_attributes"][
-            "event_type"
-        ]["state"]
+        assert (
+            code
+            in translations["event"]["access_event"]["state_attributes"]["event_type"][
+                "state"
+            ]
+        )
 
 
 def test_display_handles_missing_codes_and_limits_long_names(display_modules):
@@ -278,7 +299,9 @@ def test_tamper_sensor_tracks_alarm_and_requires_live_event_stream(display_modul
     asyncio.run(
         modules.binary_sensor.async_setup_entry(
             None,
-            SimpleNamespace(runtime_data=SimpleNamespace(api=api)),
+            SimpleNamespace(
+                runtime_data=SimpleNamespace(api=api), async_on_unload=lambda _: None
+            ),
             added.extend,
         )
     )
@@ -303,3 +326,44 @@ def test_tamper_sensor_tracks_alarm_and_requires_live_event_stream(display_modul
     )
     assert sensor.is_on is False
     assert sensor.extra_state_attributes == {"active_sources": []}
+
+
+def test_binary_sensor_is_discovered_once_and_unavailable_after_losing_its_reading(
+    display_modules,
+):
+    api = display_modules.api.HikvisionAccessAPI(
+        host="192.168.1.100",
+        port=443,
+        username="test",
+        password="test",
+        use_https=True,
+        verify_ssl=False,
+        configured_name="Gate",
+    )
+    api._loop = SimpleNamespace(
+        is_closed=lambda: False, call_soon_threadsafe=lambda callback: callback()
+    )
+    callbacks = []
+    entry = SimpleNamespace(
+        runtime_data=SimpleNamespace(api=api), async_on_unload=callbacks.append
+    )
+    entities = []
+    asyncio.run(
+        display_modules.binary_sensor.async_setup_entry(None, entry, entities.extend)
+    )
+    assert len(entities) == 3
+
+    api.observations.record_probe("access_status", 0, {"battery_low": False}, None)
+    api._notify()
+    api._notify()
+    assert len(entities) == 4
+    battery = entities[-1]
+    assert battery._attr_translation_key == "battery_low"
+    assert battery.is_on is False
+    assert battery.available is True
+
+    api.observations.record_probe("access_status", 0, {}, "cannot_connect")
+    api._notify()
+    assert battery.available is False
+    callbacks[0]()
+    assert not api._listeners

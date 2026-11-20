@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+
+from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.translation import async_get_translations
 
+from . import HikvisionConfigEntry
 from .api import HikvisionAccessAPI
 from .const import DOMAIN
 from .event_display import UNKNOWN_EVENT_LABELS
@@ -21,6 +26,35 @@ async def async_get_unknown_event_labels(hass) -> dict[str, str]:
         code: translations.get(f"{prefix}{code}", fallback)
         for code, fallback in UNKNOWN_EVENT_LABELS.items()
     }
+
+
+@callback
+def async_add_observation_entities(
+    entry: HikvisionConfigEntry,
+    add_entities: AddConfigEntryEntitiesCallback,
+    factories: Mapping[str, Callable[[], Entity]],
+) -> None:
+    """Create an optional entity once its first documented reading arrives."""
+    api = entry.runtime_data.api
+    pending = dict(factories)
+
+    @callback
+    def discover() -> None:
+        keys = api.observations.readings.keys() & pending.keys()
+        if keys:
+            add_entities([pending.pop(key)() for key in sorted(keys)])
+        if not pending:
+            remove_listener()
+
+    remove_listener = api.add_listener(discover)
+
+    @callback
+    def stop_discovery() -> None:
+        pending.clear()
+        remove_listener()
+
+    entry.async_on_unload(stop_discovery)
+    discover()
 
 
 class HikvisionAccessEntity(Entity):

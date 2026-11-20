@@ -1,0 +1,44 @@
+# Copie estes itens para automations.yaml ou um de cada vez para o editor YAML.
+# Use o ID da entrada do terminal, os nomes do VoIP Stack e as entidades locais.
+- id: hikvision_registrar_etapa_sip
+  alias: Registrar etapas da chamada do portão
+  triggers:
+    - trigger: voip_stack.call_received
+      id: received
+      options:
+        caller: Portao social
+        destination: Telefone do morador
+    - trigger: voip_stack.call_connected
+      id: connected
+      options:
+        caller: Portao social
+        destination: Telefone do morador
+    - trigger: voip_stack.call_ended
+      id: ended
+  actions:
+    - action: hikvision_access_control.report_sip_call
+      data:
+        config_entry_id: ID_DA_ENTRADA_HIKVISION
+        call_id: "{{ trigger.call.call_id }}"
+        stage: "{{ trigger.id }}"
+  mode: queued
+
+- id: hikvision_alertar_chamada_sip_ausente
+  alias: Alertar quando a campainha toca sem chamada SIP
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.portao_social_campainha_tocando
+      to: "on"
+  actions:
+    - wait_template: >-
+        {% set recebido = state_attr('sensor.portao_social_etapa_da_chamada_no_servidor_sip', 'received_at') %}
+        {{ as_timestamp(recebido, 0) >= as_timestamp(trigger.to_state.last_changed) - 5 }}
+      timeout: "00:00:10"
+      continue_on_timeout: true
+    - condition: template
+      value_template: "{{ not wait.completed }}"
+    - action: notify.mobile_app_seu_celular
+      data:
+        title: Campainha sem chamada SIP
+        message: A campainha do portão tocou e a chamada não chegou ao ramal do morador.
+  mode: restart

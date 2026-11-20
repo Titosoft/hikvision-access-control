@@ -28,6 +28,7 @@ async def async_get_config_entry_diagnostics(
         "device": {
             "model": api.model,
             "firmware": api.firmware_version,
+            "firmware_released_date": api.firmware_released_date,
             "available": api.available,
             "call_status_poll_available": api.call_status_poll_available,
             "call_status_poll_error": api.call_status_poll_error,
@@ -37,5 +38,7 @@ async def async_get_config_entry_diagnostics(
             "tamper_detected": api.tamper_detected,
             "tamper_sources": list(api.tamper_sources or ()),
         },
+        "readings": api.observations.readings,
+        "observability": api.observations.diagnostics,
         "last_event": async_redact_data(dict(api.last_event or {}), EVENT_TO_REDACT),
     }

@@ -9,20 +9,32 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from asyncio import AbstractEventLoop
+from collections import Counter
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import requests
 from requests.auth import HTTPDigestAuth
 
 from .const import (
+    AUTH_FAILURE_RESULTS,
     AUTH_SUCCESS_EVENTS,
     DEFAULT_CALL_STATUS_POLL_INTERVAL,
     DOORBELL_EVENTS,
     EVENT_LABELS,
     ISAPI_EVENT_LABELS,
     TAMPER_EVENTS,
+)
+from .observability import (
+    STATUS_PROBES,
+    HikvisionObservations,
+    decode_document,
+    history_record,
+    integer,
+    status_values,
+    verification_mode,
 )
 from .parser import HikvisionMultipartParser
 
@@ -35,6 +47,11 @@ CALL_STATUS_RETRY_MAX_SECONDS = 30
 BACKGROUND_STOP_TIMEOUT_SECONDS = 5
 CALL_STATUS_REQUEST_TIMEOUT = (2, 2)
 CALL_STATUS_PATH = "/ISAPI/VideoIntercom/callStatus?format=json"
+STATUS_REQUEST_TIMEOUT = (2, 3)
+STATUS_RETRY_SECONDS = 60
+STATUS_PERMISSION_RETRY_SECONDS = 300
+HISTORY_PATH = "/ISAPI/AccessControl/AcsEvent?format=json"
+MAX_HISTORY_PAGES = 10
 SNAPSHOT_PATH = "/Streaming/channels/101/picture"
 LOG_REDACTED = "**REDACTED**"
 LOG_SENSITIVE_FIELDS = {
@@ -119,8 +136,10 @@ class HikvisionAccessAPI:
         self.serial_number: str | None = None
         self.mac_address: str | None = None
         self.firmware_version: str | None = None
+        self.firmware_released_date: str | None = None
         self.unique_id = host
 
+        self.observations = HikvisionObservations()
         self.available = False
         self.call_status_poll_available: bool | None = None
         self.call_status_poll_error: str | None = None
@@ -156,6 +175,7 @@ class HikvisionAccessAPI:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._call_status_thread: threading.Thread | None = None
+        self._status_thread: threading.Thread | None = None
         self._session: requests.Session | None = None
         self._response: requests.Response | None = None
         self._stream_lock = threading.Lock()
@@ -199,6 +219,7 @@ class HikvisionAccessAPI:
         self.serial_number = values.get("serialNumber")
         self.mac_address = values.get("macAddress")
         self.firmware_version = values.get("firmwareVersion")
+        self.firmware_released_date = values.get("firmwareReleasedDate")
         reported_name = values.get("deviceName")
         if self.configured_name.strip():
             self.device_name = self.configured_name.strip()
@@ -243,7 +264,7 @@ class HikvisionAccessAPI:
         )
 
     def start(self, loop: AbstractEventLoop) -> None:
-        """Start the background event stream and call-status polling."""
+        """Start the event stream and the two independent polling workers."""
         self._loop = loop
         self._stop.clear()
         if not self._thread or not self._thread.is_alive():
@@ -266,6 +287,13 @@ class HikvisionAccessAPI:
                 self.call_status_poll_interval,
             )
             self._call_status_thread.start()
+        if not self._status_thread or not self._status_thread.is_alive():
+            self._status_thread = threading.Thread(
+                target=self._poll_observability_forever,
+                name=f"hikvision-observability-{self.host}",
+                daemon=True,
+            )
+            self._status_thread.start()
 
     def stop(self) -> None:
         """Stop the event stream and call-status polling."""
@@ -288,7 +316,7 @@ class HikvisionAccessAPI:
                     exc_info=True,
                 )
         deadline = time.monotonic() + BACKGROUND_STOP_TIMEOUT_SECONDS
-        for thread in (self._thread, self._call_status_thread):
+        for thread in (self._thread, self._call_status_thread, self._status_thread):
             if (
                 thread
                 and thread.is_alive()
@@ -299,12 +327,15 @@ class HikvisionAccessAPI:
             self._thread = None
         if self._call_status_thread is None or not self._call_status_thread.is_alive():
             self._call_status_thread = None
-        if self._thread is not None or self._call_status_thread is not None:
+        if self._status_thread is None or not self._status_thread.is_alive():
+            self._status_thread = None
+        if self._thread or self._call_status_thread or self._status_thread:
             _LOGGER.warning(
                 "Hikvision background workers for %s did not stop within %s seconds",
                 self.host,
                 BACKGROUND_STOP_TIMEOUT_SECONDS,
             )
+        self.observations.clear_samples()
         self._set_available(False)
         self._set_call_status_poll_state(False)
         _LOGGER.debug("Hikvision event stream for %s stopped", self.host)
@@ -316,6 +347,7 @@ class HikvisionAccessAPI:
             'xmlns="http://www.isapi.org/ver20/XMLSchema">'
             "<cmd>open</cmd></RemoteControlDoor>"
         )
+        started = time.monotonic()
         self._request(
             "PUT",
             f"/ISAPI/AccessControl/RemoteControl/door/{door_no}",
@@ -323,11 +355,131 @@ class HikvisionAccessAPI:
             headers={"Content-Type": "application/xml"},
             timeout=15,
         )
+        self.observations.record_command(door_no, started)
+        self._notify()
         _LOGGER.debug(
             "Hikvision terminal %s accepted the open command for door %s",
             self.host,
             door_no,
         )
+
+    def _poll_observability_forever(self) -> None:
+        """Discover and refresh optional capabilities without blocking the doorbell."""
+        due = dict.fromkeys(STATUS_PROBES, 0.0)
+        while due and not self._stop.is_set():
+            for probe, next_read in tuple(due.items()):
+                if self._stop.is_set():
+                    return
+                if time.monotonic() < next_read:
+                    continue
+                interval = self._read_observability_probe(probe)
+                if interval is None:
+                    del due[probe]
+                else:
+                    due[probe] = time.monotonic() + interval
+            if due and self._stop.wait(max(0, min(due.values()) - time.monotonic())):
+                break
+
+    def _read_observability_probe(self, probe: str) -> int | None:
+        """Refresh one optional endpoint and return its next polling interval."""
+        path, root, interval = STATUS_PROBES[probe]
+        started = time.monotonic()
+        error = None
+        values: dict[str, Any] = {}
+        try:
+            response = self._request("GET", path, timeout=STATUS_REQUEST_TIMEOUT)
+            values = status_values(probe, decode_document(response.content, root))
+        except HikvisionAuthError:
+            error = "permission_denied"
+            interval = STATUS_PERMISSION_RETRY_SECONDS
+        except HikvisionApiError as err:
+            if err.http_status in (404, 405, 501) or err.isapi_status == "4":
+                error = "not_supported"
+                interval = None
+            else:
+                error = self._call_status_poll_error_code(err)
+                interval = max(interval or 0, STATUS_RETRY_SECONDS)
+        except (ET.ParseError, ValueError):
+            error = "invalid_response"
+            interval = max(interval or 0, STATUS_RETRY_SECONDS)
+        if not self._stop.is_set():
+            self.observations.record_probe(probe, started, values, error)
+            self._notify()
+        return interval
+
+    def get_access_history(
+        self, start_time: datetime, end_time: datetime, limit: int
+    ) -> dict[str, Any]:
+        """Read historical event metadata without replaying live automations."""
+        conditions = {
+            "searchID": uuid4().hex,
+            "searchResultPosition": 0,
+            "maxResults": min(limit, 30),
+            "major": 0,
+            "minor": 0,
+            "startTime": start_time.astimezone(UTC).isoformat(timespec="seconds"),
+            "endTime": end_time.astimezone(UTC).isoformat(timespec="seconds"),
+            "picEnable": False,
+        }
+        events: list[dict[str, Any]] = []
+        total_matches = None
+        more = False
+        for _ in range(MAX_HISTORY_PAGES):
+            if self._stop.is_set():
+                raise HikvisionApiError("The integration is unloading")
+            response = self._request(
+                "POST",
+                HISTORY_PATH,
+                json={"AcsEventCond": conditions},
+                timeout=STATUS_REQUEST_TIMEOUT,
+            )
+            try:
+                page = decode_document(response.content, "AcsEvent")
+            except (ValueError, ET.ParseError) as err:
+                raise HikvisionApiError("Invalid access-history response") from err
+            status = str(page.get("responseStatusStrg", "")).strip().upper()
+            records = page.get("InfoList")
+            if records is None:
+                records = []
+            if (
+                status not in ("OK", "MORE", "NO MATCH")
+                or not isinstance(records, list)
+                or not all(isinstance(record, dict) for record in records)
+            ):
+                raise HikvisionApiError("Invalid access-history page")
+            total_matches = integer(page.get("totalMatches"))
+            events.extend(history_record(record) for record in records)
+            position = int(conditions["searchResultPosition"]) + len(records)
+            more = status == "MORE" or (
+                total_matches is not None and position < total_matches
+            )
+            if not records or not more or len(events) >= limit:
+                break
+            conditions["searchResultPosition"] = position
+            conditions["maxResults"] = min(limit - len(events), 30)
+        truncated = more or len(events) > limit
+        events = events[:limit]
+        auth_counts: Counter[str] = Counter()
+        auth_counts_by_method: dict[str, Counter[str]] = {}
+        for event in events:
+            if result := event.get("result"):
+                auth_counts[result] += 1
+                if method := event.get("verify_mode"):
+                    auth_counts_by_method.setdefault(method, Counter())[result] += 1
+        return {
+            "events": events,
+            "total_matches": total_matches,
+            "truncated": truncated,
+            "authentication_counts": dict(auth_counts),
+            "authentication_counts_by_method": {
+                method: dict(counts) for method, counts in auth_counts_by_method.items()
+            },
+        }
+
+    def report_sip_call(self, call_id: str, stage: str) -> None:
+        """Accept a SIP lifecycle update from a Home Assistant automation."""
+        if self.observations.record_sip_call(call_id, stage):
+            self._notify()
 
     def _request(
         self,
@@ -406,6 +558,9 @@ class HikvisionAccessAPI:
         """Poll callStatus and process state transitions without using HCNetSDK."""
         delay = self.call_status_poll_interval
         while not self._stop.is_set():
+            started = time.monotonic()
+            error = None
+            previous = self.call_status
             try:
                 # A fresh Digest handshake matches curl and avoids stale nonces on
                 # Hikvision firmware that rejects a long-lived authenticated session.
@@ -413,27 +568,25 @@ class HikvisionAccessAPI:
                 if self._stop.is_set():
                     break
             except HikvisionAuthError:
+                error = "invalid_auth"
                 if self.call_status_poll_available is not False:
                     _LOGGER.error(
                         "Authentication failed while polling Hikvision call "
                         "status for %s",
                         self.host,
                     )
-                self._set_call_status_poll_state(False, "invalid_auth")
                 delay = max(
                     CALL_STATUS_RETRY_MAX_SECONDS,
                     self.call_status_poll_interval,
                 )
             except (HikvisionApiError, requests.RequestException, OSError) as err:
+                error = self._call_status_poll_error_code(err)
                 if self.call_status_poll_available is not False:
                     _LOGGER.warning(
                         "Hikvision call-status polling for %s failed: %s",
                         self.host,
                         err,
                     )
-                self._set_call_status_poll_state(
-                    False, self._call_status_poll_error_code(err)
-                )
                 delay = min(
                     max(delay * 2, self.call_status_poll_interval),
                     max(
@@ -442,11 +595,11 @@ class HikvisionAccessAPI:
                     ),
                 )
             except Exception:  # noqa: BLE001 - keep the polling worker alive
+                error = "internal_error"
                 _LOGGER.exception(
                     "Unexpected Hikvision call-status polling error for %s",
                     self.host,
                 )
-                self._set_call_status_poll_state(False, "internal_error")
                 delay = max(
                     CALL_STATUS_RETRY_MAX_SECONDS,
                     self.call_status_poll_interval,
@@ -457,14 +610,24 @@ class HikvisionAccessAPI:
                         "Hikvision call-status polling for %s connected",
                         self.host,
                     )
-                self._set_call_status_poll_state(True)
                 delay = self.call_status_poll_interval
-                self._handle_polled_call_status(status)
+                self._handle_polled_call_status(status, started=started)
+            if self._stop.is_set():
+                break
+            self.observations.record_probe("call_status", started, {}, error)
+            state_changed = self.call_status_poll_available != (error is None)
+            self._set_call_status_poll_state(error is None, error)
+            if error is None and not state_changed and previous != self.call_status:
+                self._notify()
             if self._stop.wait(delay):
                 break
 
-    def _handle_polled_call_status(self, status: str) -> None:
+    def _handle_polled_call_status(
+        self, status: str, *, started: float | None = None
+    ) -> None:
         """Turn a changed polled status into the existing call event format."""
+        if not self.observations.record_intercom_status(status, "poll", started):
+            return
         previous = self.call_status
         self.call_status = status
         if status == previous:
@@ -481,28 +644,31 @@ class HikvisionAccessAPI:
                 "eventState": "active",
                 "dateTime": datetime.now().astimezone().isoformat(),
                 "ChangedCallStatus": {"CallStatus": {"status": status, "cmd": "poll"}},
-            }
+            },
+            source="poll",
         )
 
     @staticmethod
     def _validate_response_status(response: requests.Response) -> None:
-        """Raise when an XML ResponseStatus reports an application-level error."""
+        """Raise when a documented ISAPI status reports an application error."""
         content = response.content.lstrip()
-        if not content.startswith(b"<"):
+        values = None
+        if content.startswith(b"<"):
+            try:
+                values = decode_document(content, "ResponseStatus")
+            except (ET.ParseError, ValueError):
+                return
+        elif content.startswith(b"{"):
+            try:
+                payload = json.loads(content)
+            except ValueError:
+                return
+            if isinstance(payload, dict):
+                values = payload.get("ResponseStatus", payload)
+        if not isinstance(values, dict) or "statusCode" not in values:
             return
-        try:
-            root = ET.fromstring(content)
-        except ET.ParseError:
-            return
-        if HikvisionAccessAPI._local_name(root.tag) != "ResponseStatus":
-            return
-
-        values = {
-            HikvisionAccessAPI._local_name(element.tag): (element.text or "").strip()
-            for element in root.iter()
-        }
-        status_code = values.get("statusCode")
-        status_string = values.get("statusString", "Unknown error")
+        status_code = str(values["statusCode"])
+        status_string = str(values.get("statusString", "Unknown error"))
         sub_status = values.get("subStatusCode")
         if status_code in ("0", "1") and status_string.casefold() == "ok":
             return
@@ -570,6 +736,7 @@ class HikvisionAccessAPI:
             parser = HikvisionMultipartParser.from_content_type(
                 response.headers.get("Content-Type")
             )
+            self.observations.stream_connected()
             self._set_available(True)
             _LOGGER.info("Hikvision event stream for %s connected", self.host)
             for chunk in response.iter_content(chunk_size=8192):
@@ -699,10 +866,12 @@ class HikvisionAccessAPI:
             )
         # ISAPI also uses inactive videoloss alerts as stream heartbeats.
         # Ignore them before changing event or pending picture state.
-        if event_type == "heartbeat" or (
+        heartbeat = event_type == "heartbeat" or (
             event_type == "videoloss"
             and str(payload.get("eventState") or "").casefold() == "inactive"
-        ):
+        )
+        self.observations.stream_message(heartbeat)
+        if heartbeat:
             return
         if event_type == "accesscontrollerevent":
             self._handle_event(payload)
@@ -760,7 +929,9 @@ class HikvisionAccessAPI:
             )
         self._notify()
 
-    def _handle_changed_call_status(self, payload: dict[str, Any]) -> bool:
+    def _handle_changed_call_status(
+        self, payload: dict[str, Any], *, source: str = "stream"
+    ) -> bool:
         """Convert a documented intercom ring status to a doorbell event."""
         changed_status = payload.get("ChangedCallStatus") or payload.get(
             "changedCallStatus"
@@ -773,8 +944,13 @@ class HikvisionAccessAPI:
         if not isinstance(call_status, dict):
             return False
         status = str(call_status.get("status") or "").strip().casefold()
+        if source == "stream" and status:
+            self.observations.record_intercom_status(status, source)
         if status in IDLE_CALL_STATUSES:
+            was_ringing = self.doorbell_ringing
             self._set_doorbell_ringing(False)
+            if source == "stream" and not was_ringing:
+                self._notify()
             _LOGGER.debug(
                 "Hikvision intercom on %s left the ringing state (%s)",
                 self.host,
@@ -909,6 +1085,9 @@ class HikvisionAccessAPI:
             self._set_doorbell_ringing(True)
         self.last_event = normalized
         self._update_tamper_state(event_name, detail)
+        self.observations.record_access_event(
+            event_name, self._to_int(detail.get("doorNo"))
+        )
 
         if event_code == (5, 21):
             self.relay_unlocked = True
@@ -917,7 +1096,15 @@ class HikvisionAccessAPI:
 
         if event_code in AUTH_SUCCESS_EVENTS:
             self.last_auth = normalized
-            self.last_result = "authorized"
+            result = "authorized"
+        else:
+            result = AUTH_FAILURE_RESULTS.get(event_name)
+        if result is not None:
+            self.last_result = result
+            normalized["result"] = result
+            self.observations.record_auth_result(
+                result, verification_mode(normalized["verify_mode"])
+            )
 
         if event_code in DOORBELL_EVENTS:
             normalized["picture_available"] = False
@@ -1113,6 +1300,8 @@ class HikvisionAccessAPI:
             timer.cancel()
 
     def _set_available(self, available: bool) -> None:
+        if not available:
+            self.observations.stream_disconnected()
         if self.available == available:
             return
         self.available = available
@@ -1135,7 +1324,8 @@ class HikvisionAccessAPI:
         if isinstance(error, HikvisionApiError) and error.http_status is not None:
             return f"http_{error.http_status}"
         if isinstance(error, HikvisionApiError) and error.isapi_status is not None:
-            return f"isapi_{error.isapi_status}"
+            code = integer(error.isapi_status)
+            return f"isapi_{code}" if code is not None else "invalid_response"
         if "response" in str(error).casefold():
             return "invalid_response"
         return "cannot_connect"

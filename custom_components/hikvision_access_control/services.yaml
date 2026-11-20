@@ -1,0 +1,41 @@
+get_access_history:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: hikvision_access_control
+    start_time:
+      required: true
+      selector:
+        datetime:
+    end_time:
+      required: true
+      selector:
+        datetime:
+    limit:
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+report_sip_call:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: hikvision_access_control
+    call_id:
+      required: true
+      selector:
+        text:
+    stage:
+      required: true
+      selector:
+        select:
+          options:
+            - received
+            - connected
+            - ended

@@ -5,21 +5,81 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfInformation,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import HikvisionConfigEntry
 from .const import EVENT_LABELS, ISAPI_EVENT_LABELS
-from .entity import HikvisionAccessEntity, async_get_unknown_event_labels
+from .entity import (
+    HikvisionAccessEntity,
+    async_add_observation_entities,
+    async_get_unknown_event_labels,
+)
 from .event_display import event_display_type
+from .observability import ACCESS_ENUMS, CIRCUIT_STATES, DOOR_MODES, SIP_CALL_STAGES
 
 EVENT_OPTIONS = sorted(
     set(EVENT_LABELS.values())
     | set(ISAPI_EVENT_LABELS.values())
     | {"unknown_access_event", "unknown_isapi_event"}
+)
+
+OBSERVATION_SENSORS = (
+    SensorEntityDescription(
+        key="uptime",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+    ),
+    SensorEntityDescription(
+        key="cpu_usage",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="memory_used",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="memory_available",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(
+        key="device_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    SensorEntityDescription(key="user_count", icon="mdi:account-multiple"),
+    SensorEntityDescription(key="card_count", icon="mdi:card-account-details"),
+    *(
+        SensorEntityDescription(
+            key=key, device_class=SensorDeviceClass.ENUM, options=list(options.values())
+        )
+        for key, options in (
+            ("door_mode", DOOR_MODES),
+            ("door_contact_circuit", CIRCUIT_STATES),
+            ("door_relay_circuit", CIRCUIT_STATES),
+            *((key, options) for key, (_, options) in ACCESS_ENUMS.items()),
+        )
+    ),
 )
 
 
@@ -31,17 +91,122 @@ async def async_setup_entry(
     """Set up Hikvision sensors."""
     api = entry.runtime_data.api
     labels = await async_get_unknown_event_labels(hass)
-    async_add_entities(
-        [
-            HikvisionConnectionSensor(api),
-            HikvisionLastAuthSensor(api, "last_user", "mdi:account"),
-            HikvisionLastAuthSensor(api, "employee_id", "mdi:identifier"),
-            HikvisionLastAuthSensor(api, "verify_mode", "mdi:face-recognition"),
-            HikvisionResultSensor(api),
-            HikvisionLastAccessTimeSensor(api),
-            HikvisionLastEventSensor(api, labels),
-        ]
-    )
+    entities = [
+        HikvisionConnectionSensor(api),
+        HikvisionLastAuthSensor(api, "last_user", "mdi:account"),
+        HikvisionLastAuthSensor(api, "employee_id", "mdi:identifier"),
+        HikvisionLastAuthSensor(api, "verify_mode", "mdi:face-recognition"),
+        HikvisionResultSensor(api),
+        HikvisionLastAccessTimeSensor(api),
+        HikvisionLastEventSensor(api, labels),
+        HikvisionIntercomStatusSensor(api),
+    ]
+    if api.door_control_supported is not False:
+        entities.append(HikvisionOpenCommandSensor(api))
+    async_add_entities(entities)
+    optional_sensors = {
+        description.key: lambda description=description: HikvisionObservationSensor(
+            api, description
+        )
+        for description in OBSERVATION_SENSORS
+    }
+    optional_sensors["sip_call_stage"] = lambda: HikvisionSipCallSensor(api)
+    async_add_observation_entities(entry, async_add_entities, optional_sensors)
+
+
+class HikvisionObservationSensor(HikvisionAccessEntity, SensorEntity):
+    """Expose a field supported by the device's optional status reads."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, api, description: SensorEntityDescription) -> None:
+        super().__init__(api, description.key)
+        self.entity_description = description
+        self._attr_translation_key = description.key
+
+    @property
+    def available(self) -> bool:
+        return self.entity_description.key in self.api.observations.readings
+
+    @property
+    def native_value(self) -> Any:
+        return self.api.observations.readings.get(self.entity_description.key)
+
+
+class HikvisionOpenCommandSensor(HikvisionAccessEntity, SensorEntity):
+    """Expose the most recent accepted button command and contact evidence."""
+
+    _attr_translation_key = "last_open_command"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "last_open_command")
+
+    @property
+    def native_value(self) -> datetime | None:
+        accepted_at = self.api.observations.last_command.get("accepted_at")
+        return datetime.fromisoformat(accepted_at) if accepted_at else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        command = self.api.observations.last_command
+        command.pop("accepted_at", None)
+        return command
+
+
+class HikvisionSipCallSensor(HikvisionAccessEntity, SensorEntity):
+    """Expose SIP server stages forwarded by Home Assistant automations."""
+
+    _attr_translation_key = "sip_call_stage"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(SIP_CALL_STAGES)
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "sip_call_stage")
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api.observations.sip_call)
+
+    @property
+    def native_value(self) -> str | None:
+        return self.api.observations.sip_call.get("stage")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        call = self.api.observations.sip_call
+        call.pop("stage", None)
+        return call
+
+
+class HikvisionIntercomStatusSensor(HikvisionAccessEntity, SensorEntity):
+    """Expose the latest raw status signaled by the ISAPI intercom."""
+
+    _attr_translation_key = "intercom_status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:phone-in-talk"
+
+    def __init__(self, api) -> None:
+        super().__init__(api, "intercom_status")
+
+    @property
+    def available(self) -> bool:
+        return self.api.call_status_poll_available is True or (
+            self.api.available
+            and self.api.observations.intercom.get("source") == "stream"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        return self.api.observations.intercom.get("status")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        status = self.api.observations.intercom
+        status.pop("status", None)
+        return status
 
 
 class HikvisionConnectionSensor(HikvisionAccessEntity, SensorEntity):
@@ -63,6 +228,15 @@ class HikvisionConnectionSensor(HikvisionAccessEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         return "online" if self.api.available else "offline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stream = self.api.observations.stream
+        return {
+            key: stream[key]
+            for key in ("reconnections", "last_heartbeat_at", "last_gap")
+            if key in stream
+        }
 
 
 class HikvisionLastAuthSensor(HikvisionAccessEntity, SensorEntity):
@@ -90,7 +264,7 @@ class HikvisionResultSensor(HikvisionAccessEntity, SensorEntity):
 
     _attr_translation_key = "last_result"
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["authorized"]
+    _attr_options = ["authorized", "denied", "timeout"]
     _attr_icon = "mdi:shield-account"
 
     def __init__(self, api) -> None:

@@ -57,8 +57,57 @@
       "unique_id_mismatch": "As configurações identificam outro terminal."
     }
   },
+  "services": {
+    "get_access_history": {
+      "name": "Consultar histórico de acesso",
+      "description": "Consulta metadados de eventos guardados no terminal.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Terminal"
+        },
+        "start_time": {
+          "name": "Início do período"
+        },
+        "end_time": {
+          "name": "Fim do período"
+        },
+        "limit": {
+          "name": "Máximo de resultados"
+        }
+      }
+    },
+    "report_sip_call": {
+      "name": "Registrar etapa da chamada SIP",
+      "description": "Registra uma etapa informada pela automação do servidor SIP.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Terminal"
+        },
+        "call_id": {
+          "name": "Identificador da chamada SIP"
+        },
+        "stage": {
+          "name": "Etapa da chamada"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_loaded": {
+      "message": "Selecione um terminal Hikvision carregado."
+    },
+    "invalid_history_range": {
+      "message": "O fim do período deve ser posterior ao início."
+    },
+    "history_failed": {
+      "message": "O terminal não retornou o histórico. Verifique o suporte e as permissões da ISAPI."
+    }
+  },
   "entity": {
     "binary_sensor": {
+      "door_contact": {"name": "Contato da porta"},
+      "battery_low": {"name": "Bateria de backup baixa"},
+      "security_module": {"name": "Módulo seguro da porta"},
       "tamper": {"name": "Violação"},
       "doorbell_ringing": {"name": "Campainha tocando"},
       "relay_unlocked": {"name": "Relé de abertura"}
@@ -303,6 +352,115 @@
       }
     },
     "sensor": {
+      "intercom_status": {
+        "name": "Estado da chamada ISAPI"
+      },
+      "sip_call_stage": {
+        "name": "Etapa da chamada no servidor SIP",
+        "state": {
+          "received": "Recebida",
+          "connected": "Conectada",
+          "ended": "Encerrada"
+        }
+      },
+      "last_open_command": {
+        "name": "Último comando de abertura aceito"
+      },
+      "door_contact_circuit": {
+        "name": "Circuito do contato da porta",
+        "state": {
+          "closed": "Fechado",
+          "open": "Aberto",
+          "short_circuit": "Curto-circuito",
+          "open_circuit": "Circuito interrompido",
+          "fault": "Falha"
+        }
+      },
+      "door_relay_circuit": {
+        "name": "Circuito do relé da porta",
+        "state": {
+          "closed": "Fechado",
+          "open": "Aberto",
+          "short_circuit": "Curto-circuito",
+          "open_circuit": "Circuito interrompido",
+          "fault": "Falha"
+        }
+      },
+      "door_mode": {
+        "name": "Modo de operação da porta",
+        "state": {
+          "sleep": "Em repouso",
+          "always_unlocked": "Permanentemente destravada",
+          "always_locked": "Permanentemente travada",
+          "normal": "Normal"
+        }
+      },
+      "power_supply": {
+        "name": "Fonte de alimentação",
+        "state": {
+          "ac": "Rede elétrica",
+          "battery": "Bateria"
+        }
+      },
+      "battery_charge": {
+        "name": "Carregamento da bateria",
+        "state": {
+          "charging": "Carregando",
+          "not_charging": "Sem carregamento"
+        }
+      },
+      "sip_registration": {
+        "name": "Estado SIP do terminal",
+        "state": {
+          "connected": "Conectado",
+          "disconnected": "Desconectado",
+          "unregistered": "Sem registro"
+        }
+      },
+      "voip_registration": {
+        "name": "Estado VoIP do terminal",
+        "state": {
+          "connected": "Conectado",
+          "disconnected": "Desconectado",
+          "unregistered": "Sem registro"
+        }
+      },
+      "network_status": {
+        "name": "Estado de rede do terminal",
+        "state": {
+          "connected": "Conectado",
+          "disconnected": "Desconectado",
+          "ip_conflict": "Conflito de IP"
+        }
+      },
+      "storage_status": {
+        "name": "Estado do cartão de memória",
+        "state": {
+          "mounted": "Montado",
+          "unmounted": "Desmontado"
+        }
+      },
+      "uptime": {
+        "name": "Tempo em funcionamento"
+      },
+      "cpu_usage": {
+        "name": "Uso de CPU"
+      },
+      "memory_used": {
+        "name": "Memória em uso"
+      },
+      "memory_available": {
+        "name": "Memória disponível"
+      },
+      "device_temperature": {
+        "name": "Temperatura do terminal"
+      },
+      "user_count": {
+        "name": "Usuários cadastrados"
+      },
+      "card_count": {
+        "name": "Cartões cadastrados"
+      },
       "connection": {
         "name": "Conexão ISAPI",
         "state": {"offline": "Offline", "online": "Online"}
@@ -537,7 +695,7 @@
       },
       "last_result": {
         "name": "Último resultado",
-        "state": {"authorized": "Autorizado"}
+        "state": {"authorized": "Autorizado", "denied": "Negado", "timeout": "Tempo esgotado"}
       },
       "last_user": {"name": "Último usuário"},
       "verify_mode": {"name": "Último método"}

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import sys
+from datetime import datetime
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
@@ -1264,10 +1265,11 @@ def test_stop_has_one_bounded_deadline_for_all_workers(monkeypatch) -> None:
     monkeypatch.setattr(API_MODULE, "BACKGROUND_STOP_TIMEOUT_SECONDS", 0)
     api._thread = StuckThread()
     api._call_status_thread = StuckThread()
+    api._status_thread = StuckThread()
 
     api.stop()
 
-    assert timeouts == [0, 0]
+    assert timeouts == [0, 0, 0]
 
 
 def test_started_stream_thread_stops_cleanly() -> None:
@@ -1275,11 +1277,283 @@ def test_started_stream_thread_stops_cleanly() -> None:
     loop = asyncio.new_event_loop()
     api._stream_forever = lambda: api._stop.wait()
     api._poll_call_status_forever = lambda: api._stop.wait()
+    api._poll_observability_forever = lambda: api._stop.wait()
 
     try:
         api.start(loop)
         api.stop()
         assert api._thread is None
         assert api._call_status_thread is None
+        assert api._status_thread is None
     finally:
         loop.close()
+
+
+def test_optional_probes_only_store_documented_fields(monkeypatch) -> None:
+    api = _api()
+    samples = {
+        "access_status": b"""{"AcsWorkStatus": {"magneticStatus": [1],
+            "doorLockStatus": [2], "doorStatus": [4], "batteryVoltage": 128,
+            "batteryLowVoltage": false, "powerSupplyStatus": "BatteryPowerSupply",
+            "sipStatus": "connect", "voipStatus": "unregistered",
+            "alarmInStatus": [2, "1", 0], "userName": "private"}}""",
+        "system_status": b"""<DeviceStatus xmlns="http://www.isapi.org/ver20/XMLSchema">
+            <deviceUpTime>1234</deviceUpTime>
+            <CPUList><CPU><cpuUtilization>10.5</cpuUtilization></CPU></CPUList>
+            <MemoryList><Memory><memoryUsage>80</memoryUsage></Memory></MemoryList>
+            <TemperatureList><Temperature><temperature>nan</temperature></Temperature>
+            </TemperatureList></DeviceStatus>""",
+        "user_count": b'{"UserInfoCount":{"userNumber":0}}',
+        "intercom_capabilities": b"""<VideoIntercomCap>
+            <isSupportCallStatus>true</isSupportCallStatus>
+            <isSupportCallSignal>false</isSupportCallSignal>
+            <password>private</password></VideoIntercomCap>""",
+        "two_way_audio": b"""<TwoWayAudioChannelList>
+            <TwoWayAudioChannel><id>1</id></TwoWayAudioChannel>
+            <TwoWayAudioChannel><id>2</id></TwoWayAudioChannel>
+            </TwoWayAudioChannelList>""",
+    }
+    responses = {
+        API_MODULE.STATUS_PROBES[key][0]: body for key, body in samples.items()
+    }
+
+    def request(method, path, **kwargs):
+        assert method == "GET"
+        return FakeResponse(content=responses[path])
+
+    monkeypatch.setattr(api, "_request", request)
+    for key in samples:
+        api._read_observability_probe(key)
+
+    assert api.observations.readings == {
+        "door_contact": True,
+        "door_contact_circuit": "open",
+        "door_relay_circuit": "short_circuit",
+        "door_mode": "normal",
+        "battery_voltage_raw": 128,
+        "battery_low": False,
+        "power_supply": "battery",
+        "sip_registration": "connected",
+        "voip_registration": "unregistered",
+        "active_alarm_inputs": [1, 2],
+        "uptime": 1234,
+        "cpu_usage": 10.5,
+        "memory_used": 80.0,
+        "user_count": 0,
+    }
+    assert api.observations.diagnostics["capabilities"] == {
+        "intercom_capabilities": {
+            "isSupportCallStatus": True,
+            "isSupportCallSignal": False,
+        },
+        "two_way_audio": {"channels": [1, 2]},
+    }
+    assert "private" not in str(api.observations.diagnostics)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body", "error", "next_interval"),
+    [
+        (403, b"", "permission_denied", API_MODULE.STATUS_PERMISSION_RETRY_SECONDS),
+        (404, b"", "not_supported", None),
+        (
+            200,
+            b'{"statusCode":4,"statusString":"Invalid Operation"}',
+            "not_supported",
+            None,
+        ),
+        (
+            200,
+            b'{"Unexpected":{}}',
+            "invalid_response",
+            API_MODULE.STATUS_RETRY_SECONDS,
+        ),
+        (503, b"", "http_503", API_MODULE.STATUS_RETRY_SECONDS),
+    ],
+)
+def test_optional_probe_failure_does_not_disable_live_features(
+    monkeypatch, status_code, body, error, next_interval
+) -> None:
+    api = _api()
+    api.available = True
+    api.call_status_poll_available = True
+    api.observations.record_probe("system_status", 0, {"uptime": 30}, None)
+    monkeypatch.setattr(
+        API_MODULE.requests,
+        "request",
+        lambda *args, **kwargs: FakeResponse(status_code=status_code, content=body),
+    )
+
+    assert api._read_observability_probe("system_status") == next_interval
+    assert "uptime" not in api.observations.readings
+    assert api.observations.diagnostics["probes"]["system_status"]["error"] == error
+    assert api.available is True
+    assert api.call_status_poll_available is True
+
+
+def test_contact_event_wins_over_poll_and_survives_failed_probe() -> None:
+    api = _api()
+    observations = api.observations
+    observations.record_probe("access_status", 0, {"door_contact": False}, None)
+    stale_request_start = API_MODULE.time.monotonic()
+    api._handle_event(
+        {
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 25,
+                "doorNo": 1,
+            }
+        }
+    )
+    observations.record_probe(
+        "access_status", stale_request_start, {"door_contact": False}, None
+    )
+    assert observations.readings["door_contact"] is True
+    assert api.relay_unlocked is None
+
+    observations.record_probe("access_status", 0, {}, "cannot_connect")
+    assert observations.readings["door_contact"] is True
+    api._set_available(False)
+    assert "door_contact" not in observations.readings
+
+
+def test_open_confirmation_can_arrive_before_http_response(monkeypatch) -> None:
+    api = _api()
+
+    def request(*args, **kwargs):
+        api._handle_event(
+            {
+                "AccessControllerEvent": {
+                    "majorEventType": 5,
+                    "subEventType": 25,
+                    "doorNo": 1,
+                }
+            }
+        )
+        return FakeResponse()
+
+    monkeypatch.setattr(api, "_request", request)
+    api.open_door(1)
+
+    observation = api.observations.last_command
+    assert observation["door_no"] == 1
+    assert "accepted_at" in observation
+    assert "contact_observed_at" in observation
+
+
+def test_latest_denial_preserves_the_last_authorized_user() -> None:
+    api = _api()
+    api._handle_event(
+        {
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 75,
+                "name": "Authorized User",
+            }
+        }
+    )
+    api._handle_event(
+        {
+            "AccessControllerEvent": {
+                "majorEventType": 5,
+                "subEventType": 76,
+                "name": "Denied User",
+            }
+        }
+    )
+    assert api.last_result == "denied"
+    assert api.last_event["result"] == "denied"
+    assert api.last_auth["name"] == "Authorized User"
+    assert api.observations.diagnostics["authentication_counts_since_startup"] == {
+        "authorized": 1,
+        "denied": 1,
+    }
+
+
+def test_access_history_paginates_without_replaying_or_exposing_user_data(monkeypatch):
+    api = _api()
+    queries = []
+
+    def request(method, path, **kwargs):
+        assert method == "POST"
+        assert path == API_MODULE.HISTORY_PATH
+        query = dict(kwargs["json"]["AcsEventCond"])
+        queries.append(query)
+        index = query["searchResultPosition"]
+        page = {
+            "responseStatusStrg": "MORE",
+            "totalMatches": 3,
+            "InfoList": [
+                {
+                    "major": 5,
+                    "minor": 75 + index,
+                    "serialNo": 61 + index,
+                    "currentVerifyMode": "face",
+                    "name": "Private name",
+                    "cardNo": "123",
+                    "pictureURL": "private",
+                }
+            ],
+        }
+        return FakeResponse(content=json.dumps({"AcsEvent": page}).encode())
+
+    monkeypatch.setattr(api, "_request", request)
+    response = api.get_access_history(
+        datetime.fromisoformat("2026-09-10T00:00:00-03:00"),
+        datetime.fromisoformat("2026-09-10T01:00:00-03:00"),
+        2,
+    )
+
+    assert len(queries) == 2
+    assert queries[0]["searchID"] == queries[1]["searchID"]
+    assert queries[0]["startTime"] == "2026-09-10T03:00:00+00:00"
+    assert queries[0]["picEnable"] is False
+    assert queries[1]["searchResultPosition"] == 1
+    assert response["truncated"] is True
+    assert response["total_matches"] == 3
+    assert [record["event_code"] for record in response["events"]] == [
+        "face_authenticated",
+        "authentication_failed",
+    ]
+    assert response["authentication_counts"] == {"authorized": 1, "denied": 1}
+    assert response["authentication_counts_by_method"] == {
+        "face": {"authorized": 1, "denied": 1}
+    }
+    assert "private" not in str(response).lower()
+    assert api.last_event is None
+
+
+def test_sip_stage_requires_the_same_call_and_does_not_export_its_id() -> None:
+    api = _api()
+    api.report_sip_call("old-call", "ended")
+    assert api.observations.sip_call == {}
+    api.report_sip_call("new-call", "received")
+    first_observation = api.observations.sip_call
+    api.report_sip_call("new-call", "received")
+    api.report_sip_call("old-call", "ended")
+    assert api.observations.sip_call == first_observation
+    api.report_sip_call("new-call", "connected")
+    api.report_sip_call("new-call", "ended")
+    api.report_sip_call("new-call", "connected")
+    assert set(api.observations.sip_call) == {
+        "stage",
+        "received_at",
+        "connected_at",
+        "ended_at",
+    }
+    assert api.observations.readings["sip_call_stage"] == "ended"
+    assert "new-call" not in str(api.observations.diagnostics)
+
+
+def test_call_signal_is_not_overwritten_by_an_in_flight_poll() -> None:
+    api = _api()
+    started = API_MODULE.time.monotonic()
+    api._handle_event_payload(
+        {
+            "eventType": "changedCallStatus",
+            "ChangedCallStatus": {"CallStatus": {"status": "connected"}},
+        }
+    )
+    api._handle_polled_call_status("idle", started=started)
+    assert api.observations.intercom["status"] == "connected"
+    assert api.observations.intercom["source"] == "stream"

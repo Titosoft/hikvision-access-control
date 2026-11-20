@@ -57,8 +57,57 @@
       "unique_id_mismatch": "The settings identify a different terminal."
     }
   },
+  "services": {
+    "get_access_history": {
+      "name": "Read access history",
+      "description": "Retrieve historical event metadata from the terminal.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Terminal"
+        },
+        "start_time": {
+          "name": "Start time"
+        },
+        "end_time": {
+          "name": "End time"
+        },
+        "limit": {
+          "name": "Maximum results"
+        }
+      }
+    },
+    "report_sip_call": {
+      "name": "Report SIP call stage",
+      "description": "Record a call stage from a SIP server automation.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Terminal"
+        },
+        "call_id": {
+          "name": "SIP call ID"
+        },
+        "stage": {
+          "name": "Call stage"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_loaded": {
+      "message": "Select a loaded Hikvision terminal."
+    },
+    "invalid_history_range": {
+      "message": "The end must be after the start."
+    },
+    "history_failed": {
+      "message": "The terminal did not return the access history. Check ISAPI support and permissions."
+    }
+  },
   "entity": {
     "binary_sensor": {
+      "door_contact": {"name": "Door contact"},
+      "battery_low": {"name": "Low backup battery"},
+      "security_module": {"name": "Secure door controller"},
       "tamper": {"name": "Tamper"},
       "doorbell_ringing": {"name": "Doorbell ringing"},
       "relay_unlocked": {"name": "Opening relay"}
@@ -303,6 +352,115 @@
       }
     },
     "sensor": {
+      "intercom_status": {
+        "name": "ISAPI call status"
+      },
+      "sip_call_stage": {
+        "name": "SIP server call stage",
+        "state": {
+          "received": "Received",
+          "connected": "Connected",
+          "ended": "Ended"
+        }
+      },
+      "last_open_command": {
+        "name": "Last accepted open command"
+      },
+      "door_contact_circuit": {
+        "name": "Door contact circuit",
+        "state": {
+          "closed": "Closed",
+          "open": "Open",
+          "short_circuit": "Short circuit",
+          "open_circuit": "Open circuit",
+          "fault": "Fault"
+        }
+      },
+      "door_relay_circuit": {
+        "name": "Door relay circuit",
+        "state": {
+          "closed": "Closed",
+          "open": "Open",
+          "short_circuit": "Short circuit",
+          "open_circuit": "Open circuit",
+          "fault": "Fault"
+        }
+      },
+      "door_mode": {
+        "name": "Door operating mode",
+        "state": {
+          "sleep": "Sleep",
+          "always_unlocked": "Always unlocked",
+          "always_locked": "Always locked",
+          "normal": "Normal"
+        }
+      },
+      "power_supply": {
+        "name": "Power supply",
+        "state": {
+          "ac": "Mains",
+          "battery": "Battery"
+        }
+      },
+      "battery_charge": {
+        "name": "Battery charging status",
+        "state": {
+          "charging": "Charging",
+          "not_charging": "Not charging"
+        }
+      },
+      "sip_registration": {
+        "name": "Terminal SIP status",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected",
+          "unregistered": "Unregistered"
+        }
+      },
+      "voip_registration": {
+        "name": "Terminal VoIP status",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected",
+          "unregistered": "Unregistered"
+        }
+      },
+      "network_status": {
+        "name": "Terminal network status",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected",
+          "ip_conflict": "IP conflict"
+        }
+      },
+      "storage_status": {
+        "name": "Memory card status",
+        "state": {
+          "mounted": "Mounted",
+          "unmounted": "Unmounted"
+        }
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "cpu_usage": {
+        "name": "CPU usage"
+      },
+      "memory_used": {
+        "name": "Memory used"
+      },
+      "memory_available": {
+        "name": "Memory available"
+      },
+      "device_temperature": {
+        "name": "Device temperature"
+      },
+      "user_count": {
+        "name": "Registered users"
+      },
+      "card_count": {
+        "name": "Registered cards"
+      },
       "connection": {
         "name": "ISAPI connection",
         "state": {"offline": "Offline", "online": "Online"}
@@ -537,7 +695,7 @@
       },
       "last_result": {
         "name": "Last result",
-        "state": {"authorized": "Authorized"}
+        "state": {"authorized": "Authorized", "denied": "Denied", "timeout": "Timed out"}
       },
       "last_user": {"name": "Last user"},
       "verify_mode": {"name": "Last method"}

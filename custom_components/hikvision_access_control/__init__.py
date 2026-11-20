@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import cast
 
-from homeassistant.config_entries import ConfigEntry
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
@@ -13,8 +15,21 @@ from homeassistant.const import (
     CONF_USERNAME,
     Platform,
 )
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
 from .api import HikvisionAccessAPI, HikvisionApiError, HikvisionAuthError
 from .const import (
@@ -23,7 +38,9 @@ from .const import (
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
     DEFAULT_CALL_STATUS_POLL_INTERVAL,
+    DOMAIN,
 )
+from .observability import SIP_CALL_STAGES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +61,74 @@ class HikvisionRuntimeData:
 
 
 type HikvisionConfigEntry = ConfigEntry[HikvisionRuntimeData]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register actions for loaded terminals."""
+
+    def get_api(call: ServiceCall) -> HikvisionAccessAPI:
+        entry = hass.config_entries.async_get_entry(call.data["config_entry_id"])
+        if (
+            entry is None
+            or entry.domain != DOMAIN
+            or entry.state is not ConfigEntryState.LOADED
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="entry_not_loaded"
+            )
+        return cast(HikvisionConfigEntry, entry).runtime_data.api
+
+    async def get_access_history(call: ServiceCall) -> ServiceResponse:
+        api = get_api(call)
+        start = dt_util.as_utc(call.data["start_time"])
+        end = dt_util.as_utc(call.data["end_time"])
+        if end <= start:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="invalid_history_range"
+            )
+        try:
+            return await hass.async_add_executor_job(
+                api.get_access_history, start, end, call.data["limit"]
+            )
+        except HikvisionApiError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="history_failed"
+            ) from err
+
+    async def report_sip_call(call: ServiceCall) -> None:
+        get_api(call).report_sip_call(call.data["call_id"], call.data["stage"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "get_access_history",
+        get_access_history,
+        schema=vol.Schema(
+            {
+                vol.Required("config_entry_id"): cv.string,
+                vol.Required("start_time"): cv.datetime,
+                vol.Required("end_time"): cv.datetime,
+                vol.Optional("limit", default=30): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=100)
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "report_sip_call",
+        report_sip_call,
+        schema=vol.Schema(
+            {
+                vol.Required("config_entry_id"): cv.string,
+                vol.Required("call_id"): vol.All(
+                    cv.string, str.strip, vol.Length(min=1, max=512)
+                ),
+                vol.Required("stage"): vol.In(SIP_CALL_STAGES),
+            }
+        ),
+    )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HikvisionConfigEntry) -> bool:

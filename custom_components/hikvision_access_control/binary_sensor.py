@@ -6,11 +6,12 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HikvisionConfigEntry
-from .entity import HikvisionAccessEntity
+from .entity import HikvisionAccessEntity, async_add_observation_entities
 
 
 async def async_setup_entry(
@@ -27,6 +28,50 @@ async def async_setup_entry(
             HikvisionTamperSensor(api),
         ]
     )
+    async_add_observation_entities(
+        entry,
+        async_add_entities,
+        {
+            "door_contact": lambda: HikvisionObservationBinarySensor(
+                api, "door_contact", BinarySensorDeviceClass.DOOR
+            ),
+            "battery_low": lambda: HikvisionObservationBinarySensor(
+                api, "battery_low", BinarySensorDeviceClass.BATTERY, diagnostic=True
+            ),
+            "security_module": lambda: HikvisionObservationBinarySensor(
+                api,
+                "security_module",
+                BinarySensorDeviceClass.CONNECTIVITY,
+                diagnostic=True,
+            ),
+        },
+    )
+
+
+class HikvisionObservationBinarySensor(HikvisionAccessEntity, BinarySensorEntity):
+    """Expose a boolean reported by ISAPI for this terminal."""
+
+    def __init__(
+        self,
+        api,
+        key: str,
+        device_class: BinarySensorDeviceClass,
+        *,
+        diagnostic: bool = False,
+    ) -> None:
+        super().__init__(api, key)
+        self._attr_translation_key = key
+        self._attr_device_class = device_class
+        if diagnostic:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def available(self) -> bool:
+        return self._attr_translation_key in self.api.observations.readings
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.api.observations.readings.get(self._attr_translation_key)
 
 
 class HikvisionTamperSensor(HikvisionAccessEntity, BinarySensorEntity):

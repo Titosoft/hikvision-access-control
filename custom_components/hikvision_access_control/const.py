@@ -317,3 +317,16 @@ AUTH_SUCCESS_EVENTS = {
     for event_code, event_name in EVENT_LABELS.items()
     if event_name.endswith("_authenticated")
 }
+
+AUTH_FAILURE_RESULTS = {
+    "access_denied": "denied",
+    "anti_passback_denied": "denied",
+    "authentication_attempts_exceeded": "denied",
+    "authentication_failed": "denied",
+    "authentication_timeout": "timeout",
+    "door_closed_or_dormant_authentication_failed": "denied",
+    "fingerprint_not_found": "denied",
+    "identity_card_match_failed": "denied",
+    "liveness_detection_failed": "denied",
+    "multi_factor_timeout": "timeout",
+}
